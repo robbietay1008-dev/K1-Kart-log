@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Kart Log">
+<title>K1 Kart Log</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background:#111318; color:#f2f3f5;
+    -webkit-user-select:none; user-select:none;
+    -webkit-text-size-adjust:100%;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  input, textarea, select { -webkit-user-select:text; user-select:text; }
+  .screen { display:none; min-height:100%; }
+  .screen.active { display:block; }
+  /* ---------- header ---------- */
+  .hdr {
+    position:sticky; top:0; z-index:20;
+    background:#1a1d24; border-bottom:2px solid #e10a17;
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .hdr h1 { font-size:20px; font-weight:800; letter-spacing:.5px; }
+  .hdr h1 .red { color:#e10a17; }
+  .hbtn {
+    background:#2a2e38; color:#fff; border:none; border-radius:10px;
+    font-size:16px; font-weight:700; padding:12px 16px; min-height:48px;
+  }
+  .hbtn:active { background:#3a3f4d; }
+  .hbtn.red { background:#e10a17; }
+  .hbtn.red:active { background:#b30812; }
+  /* ---------- kart grid ---------- */
+  .grid {
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(84px,1fr));
+    gap:10px; padding:14px;
+  }
+  .kbtn {
+    position:relative;
+    background:#1f232c; border:1px solid #30364a; border-radius:14px;
+    color:#fff; font-size:26px; font-weight:800;
+    min-height:76px; display:flex; align-items:center; justify-content:center;
+  }
+  .kbtn:active { background:#2c3140; }
+  .kbtn .cnt {
+    position:absolute; top:5px; right:7px; font-size:11px; font-weight:700;
+    color:#9aa3b5;
+  }
+  .kbtn.jr { border-color:#3b5b8c; }
+  .kbtn.jr:after {
+    content:"JR"; position:absolute; bottom:5px; right:7px;
+    font-size:10px; font-weight:800; color:#6fa3e8;
+  }
+  .sectionlabel { padding:14px 16px 0; color:#9aa3b5; font-size:13px; font-weight:700; letter-spacing:1px; }
+  /* ---------- kart detail ---------- */
+  .kd { padding:14px; }
+  .statuscard {
+    background:#1a1d24; border:1px solid #30364a; border-radius:16px;
+    padding:14px; margin-bottom:14px;
+  }
+  .statuscard h3 { font-size:13px; color:#9aa3b5; letter-spacing:1px; margin-bottom:10px; }
+  .srow { display:flex; flex-wrap:wrap; gap:8px; }
+  .schip {
+    background:#242938; border:1px solid #384060; border-radius:10px;
+    padding:9px 11px; font-size:14px; min-height:44px;
+    display:flex; flex-direction:column; justify-content:center;
+  }
+  .schip b { font-size:11px; color:#8fa0c9; display:block; letter-spacing:.5px; }
+  .schip span { font-size:15px; font-weight:700; }
+  .schip.overdue span { color:#ff5f6b; }
+  .schip.soon span { color:#ffc857; }
+  .bigbtn {
+    display:block; width:100%; background:#e10a17; color:#fff; border:none;
+    border-radius:16px; font-size:22px; font-weight:800; padding:18px;
+    margin:6px 0 16px; min-height:64px;
+  }
+  .bigbtn:active { background:#b30812; }
+  /* ---------- history ---------- */
+  .entry {
+    background:#1a1d24; border:1px solid #262b36; border-radius:14px;
+    padding:12px 14px; margin-bottom:10px;
+  }
+  .entry .edate { font-size:13px; font-weight:800; color:#8fa0c9; }
+  .entry .eaction { font-size:17px; font-weight:700; margin:3px 0; }
+  .entry .eparts { font-size:14px; color:#c9d2e3; word-break:break-word; }
+  .entry .emech { font-size:13px; color:#9aa3b5; margin-top:3px; }
+  .entry .enotes { font-size:14px; color:#ffc857; margin-top:3px; }
+  .delx { float:right; background:none; border:none; color:#566; font-size:18px; padding:6px 8px; }
+  .camx { float:right; background:none; border:none; font-size:18px; padding:6px 8px; }
+  .knotes {
+    width:100%; text-align:left; background:#242938; border:1px dashed #4a5674;
+    border-radius:12px; padding:12px 14px; color:#ffc857; font-size:15px;
+    min-height:50px; line-height:1.45; white-space:pre-wrap;
+  }
+  .knotes.empty { color:#667; font-style:italic; }
+  /* ---------- photos ---------- */
+  .photorow { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .thumb {
+    width:76px; height:76px; object-fit:cover; border-radius:10px;
+    border:1px solid #384060; background:#242938;
+  }
+  .thumbwrap { position:relative; }
+  .thumbrem {
+    position:absolute; top:-7px; right:-7px; background:#c1121f; color:#fff;
+    border:none; border-radius:50%; width:26px; height:26px; font-size:13px; font-weight:800;
+  }
+  .photobtn {
+    background:#2a2e38; color:#fff; border:1px dashed #4a5674; border-radius:12px;
+    font-size:16px; font-weight:700; padding:13px 16px; min-height:50px; width:100%;
+    margin-top:6px;
+  }
+  .photobtn:active { background:#3a3f4d; }
+  #pviewer {
+    position:fixed; inset:0; background:rgba(0,0,0,.95); z-index:200;
+    display:none; flex-direction:column;
+  }
+  #pviewer.open { display:flex; }
+  #pviewer img {
+    flex:1; max-width:100%; max-height:calc(100% - 90px);
+    object-fit:contain; margin:auto;
+  }
+  #pviewer .pvbar {
+    display:flex; gap:10px; padding:14px 16px calc(20px + env(safe-area-inset-bottom));
+  }
+  #pviewer .hbtn { flex:1; min-height:54px; font-size:17px; }
+  /* ---------- modal / form ---------- */
+  .modal {
+    position:fixed; inset:0; background:rgba(0,0,0,.72); z-index:50;
+    display:none; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  }
+  .modal.open { display:block; }
+  .mcard {
+    background:#181b22; border-radius:18px 18px 0 0; margin-top:40px;
+    min-height:calc(100% - 40px); padding:18px 16px calc(30px + env(safe-area-inset-bottom));
+  }
+  .mtitle { font-size:20px; font-weight:800; margin-bottom:14px; }
+  label.f { display:block; font-size:13px; font-weight:700; color:#9aa3b5; margin:14px 0 6px; letter-spacing:.5px; }
+  .in, textarea.in {
+    width:100%; background:#242938; color:#fff; border:1px solid #384060;
+    border-radius:12px; font-size:17px; padding:13px; min-height:50px;
+  }
+  textarea.in { min-height:70px; resize:vertical; }
+  .chiprow { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+  .chip {
+    background:#242938; border:1px solid #384060; color:#dfe5f1;
+    border-radius:22px; padding:11px 15px; font-size:15px; font-weight:700;
+    min-height:44px; border-style:solid;
+  }
+  .chip.on { background:#e10a17; border-color:#e10a17; color:#fff; }
+  .partresults { margin-top:6px; }
+  .partitem {
+    display:flex; align-items:center; justify-content:space-between;
+    background:#1f232c; border:1px solid #2c3140; border-radius:10px;
+    padding:10px 12px; margin-bottom:6px; font-size:14px;
+  }
+  .partitem .pn { font-weight:800; color:#6fa3e8; margin-right:8px; white-space:nowrap; }
+  .partitem .pd { color:#c9d2e3; flex:1; font-size:13px; }
+  .padd { background:#1d7a3e; border:none; color:#fff; border-radius:8px; padding:9px 13px; font-weight:800; font-size:15px; margin-left:8px; min-height:40px;}
+  .selparts { margin-top:8px; }
+  .selpart {
+    display:flex; align-items:center; background:#242938; border-radius:10px;
+    padding:8px 10px; margin-bottom:6px; font-size:15px;
+  }
+  .selpart .spn { font-weight:800; flex:1; }
+  .qbtn { background:#2f3546; color:#fff; border:none; border-radius:8px; width:42px; height:42px; font-size:20px; font-weight:800; }
+  .qnum { width:40px; text-align:center; font-weight:800; font-size:17px; }
+  .sprem { background:none; border:none; color:#ff5f6b; font-size:20px; padding:6px 10px; }
+  .mactions { display:flex; gap:10px; margin-top:22px; }
+  .mactions .hbtn { flex:1; font-size:18px; min-height:56px; }
+  .autonote { font-size:13px; color:#9aa3b5; margin-top:10px; line-height:1.5; }
+  .toast {
+    position:fixed; bottom:30px; left:50%; transform:translateX(-50%);
+    background:#1d7a3e; color:#fff; font-weight:700; padding:12px 22px;
+    border-radius:30px; z-index:99; display:none; font-size:15px;
+    max-width:90%; text-align:center;
+  }
+  .searchwrap { padding:12px 14px 0; }
+  .backrow { display:flex; align-items:center; gap:10px; }
+  .statushint { font-size:12px; color:#9aa3b5; margin-top:8px; }
+  .exportcard { background:#1a1d24; border:1px solid #30364a; border-radius:16px; padding:16px; margin:14px; }
+  .exportcard h3 { margin-bottom:8px; font-size:17px; }
+  .exportcard p { font-size:14px; color:#9aa3b5; line-height:1.5; margin-bottom:12px; }
+  .exportcard .hbtn { width:100%; margin-bottom:10px; font-size:17px; }
+  #importArea { margin-top:8px; }
+</style>
+</head>
+<body>
+
+<!-- ============ HOME ============ -->
+<div class="screen active" id="scrHome">
+  <div class="hdr">
+    <h1><span class="red">K1</span> KART LOG</h1>
+    <button class="hbtn" id="btnExportScr">Export</button>
+  </div>
+  <div class="sectionlabel">ADULT KARTS</div>
+  <div class="grid" id="gridAdult"></div>
+  <div class="sectionlabel">JUNIOR KARTS</div>
+  <div class="grid" id="gridJr"></div>
+</div>
+
+<!-- ============ KART DETAIL ============ -->
+<div class="screen" id="scrKart">
+  <div class="hdr">
+    <div class="backrow">
+      <button class="hbtn" id="btnBack">&#8592; All Karts</button>
+      <h1 id="kartTitle">KART 1</h1>
+    </div>
+    <button class="hbtn red" id="btnLogTop">+ Log</button>
+  </div>
+  <div class="kd">
+    <div class="statuscard">
+      <h3>SERVICE DATES &nbsp;<span style="font-weight:400">(tap to edit)</span></h3>
+      <div class="srow" id="svcRow"></div>
+      <h3 style="margin-top:14px">KART NOTES &nbsp;<span style="font-weight:400">(this kart's personality — tap to edit)</span></h3>
+      <button class="knotes" id="knotesBox"></button>
+      <h3 style="margin-top:14px">BATTERIES</h3>
+      <div class="srow" id="batRow"></div>
+      <div class="statushint" id="weldHint"></div>
+    </div>
+    <button class="bigbtn" id="btnLog">+ LOG WORK</button>
+    <div class="sectionlabel" style="padding-left:2px">HISTORY (newest first)</div>
+    <div id="historyList" style="margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- ============ EXPORT ============ -->
+<div class="screen" id="scrExport">
+  <div class="hdr">
+    <div class="backrow">
+      <button class="hbtn" id="btnBack2">&#8592; Back</button>
+      <h1>EXPORT</h1>
+    </div>
+  </div>
+  <div class="exportcard">
+    <h3>Google Sheet Live Sync</h3>
+    <p>One-time setup: install the sync script on the shop Google Sheet (instructions come with the app), then paste the Web App URL it gives you here. After that, every log, date, and note change is pushed to the sheet automatically over wifi — it fills the APP LOG, APP ALL DATES and APP PARTS USED tabs.</p>
+    <input type="url" class="in" id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec">
+    <button class="hbtn" id="btnSaveSync" style="margin-top:8px">Save Link</button>
+    <button class="hbtn red" id="btnSyncNow">Sync to Google Sheet Now</button>
+    <p id="syncStatus" style="margin-top:6px"></p>
+  </div>
+  <div class="exportcard">
+    <h3>Excel Export</h3>
+    <p>Makes an .xlsx file with one sheet per kart in the same layout as the shop spreadsheet (DATE, ACTION COMPLETED, parts used, MECHANIC, NOTES + tracked dates), plus an ALL DATES summary sheet.</p>
+    <button class="hbtn red" id="btnXlsx">Download Excel (.xlsx)</button>
+  </div>
+  <div class="exportcard">
+    <h3>Backup &amp; Restore</h3>
+    <p>Backup copies all log data as text. Save it somewhere safe (email it to yourself). Restore pastes it back in — use this to move data to another device. NOTE: photos are too big for the text backup — they stay on this device only.</p>
+    <button class="hbtn" id="btnBackup">Copy Backup Text</button>
+    <button class="hbtn" id="btnShowImport">Restore From Backup</button>
+    <div id="importArea" style="display:none">
+      <textarea class="in" id="importText" placeholder="Paste backup text here"></textarea>
+      <button class="hbtn red" id="btnImport" style="margin-top:8px">Restore Now</button>
+    </div>
+    <textarea class="in" id="backupOut" style="display:none; margin-top:8px" readonly></textarea>
+  </div>
+  <div class="exportcard">
+    <h3>Mechanics</h3>
+    <p id="mechList"></p>
+    <button class="hbtn" id="btnAddMech">Add Mechanic</button>
+  </div>
+</div>
+
+<!-- ============ LOG ENTRY MODAL ============ -->
+<div class="modal" id="logModal">
+  <div class="mcard">
+    <div class="mtitle" id="logTitle">Log Work — Kart 1</div>
+
+    <label class="f">DATE</label>
+    <input type="date" class="in" id="fDate">
+
+    <label class="f">QUICK PICK — WHAT WAS DONE</label>
+    <div class="chiprow" id="quickRow"></div>
+
+    <label class="f">ACTION COMPLETED</label>
+    <input type="text" class="in" id="fAction" placeholder="e.g. replace chain">
+
+    <label class="f">PARTS USED — search by number or name</label>
+    <input type="search" class="in" id="fPartSearch" placeholder="Type: chain, tire, 59687 ...">
+    <div class="partresults" id="partResults"></div>
+    <div class="selparts" id="selParts"></div>
+
+    <label class="f">MECHANIC</label>
+    <div class="chiprow" id="mechRow"></div>
+
+    <label class="f">PHOTOS (optional)</label>
+    <button class="photobtn" id="btnAddPhoto">&#128247; Add Photo</button>
+    <div class="photorow" id="formPhotos"></div>
+
+    <label class="f">NOTES (optional)</label>
+    <textarea class="in" id="fNotes" placeholder="Anything to watch..."></textarea>
+
+    <div class="autonote" id="autoNote"></div>
+
+    <div class="mactions">
+      <button class="hbtn" id="btnCancelLog">Cancel</button>
+      <button class="hbtn red" id="btnSaveLog">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- full screen photo viewer -->
+<div id="pviewer">
+  <img id="pvImg" alt="">
+  <div class="pvbar">
+    <button class="hbtn" id="pvDelete" style="background:#c1121f">Delete Photo</button>
+    <button class="hbtn" id="pvClose">Close</button>
+  </div>
+</div>
+
+<!-- hidden camera / library input -->
+<input type="file" id="photoInput" accept="image/*" multiple style="display:none">
+
+<!-- kart notes modal -->
+<div class="modal" id="knotesModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:80px 14px 0;">
+    <div class="mtitle" id="knotesTitle">Kart Notes</div>
+    <p style="color:#9aa3b5; font-size:14px; margin-bottom:10px">Quirks, things to watch, how she drives — the kart's personality. Shows next to the service dates and goes to the Google Sheet.</p>
+    <textarea class="in" id="knotesText" style="min-height:120px" placeholder="e.g. WATCH L BRAKE PINS — pulls right after bumps..."></textarea>
+    <div class="mactions">
+      <button class="hbtn" id="btnKnotesCancel">Cancel</button>
+      <button class="hbtn red" id="btnKnotesSave">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<script>/*__SHEETJS__*/</script>
+<script>
+"use strict";
+/* ================= DATA ================= */
+var PARTS = /*__PARTS__*/[];
+var SEED = /*__SEED__*/{};
+
+var ADULT_KARTS = [];
+var JR_KARTS = [];
+(function(){ var i; for(i=1;i<=40;i++) ADULT_KARTS.push(String(i)); for(i=41;i<=53;i++) JR_KARTS.push(String(i)); })();
+
+var QUICK_ACTIONS = [
+  "BRAKE FLUSH","REPLACE CHAIN","REPLACE DIFF","BRAKE PADS","TIRE CHANGE",
+  "REPLACE BATTERY","REAR END REWORK","CABLE REPLACE","WELD","INSPECTION"
+];
+
+var LS_KEY = "k1kartlog_v1";
+var DB = null;
+
+function blankStatus(){
+  return { chain:"", diff:"", brake:"", bat1:"", bat2:"", bat3:"", bat4:"", weld:0 };
+}
+
+/* ================= PHOTO STORAGE (IndexedDB) ================= */
+var idb = null;
+function openPhotoDB(cb){
+  if (idb) { cb(idb); return; }
+  var req = indexedDB.open("k1kartphotos", 1);
+  req.onupgradeneeded = function(ev){
+    var db = ev.target.result;
+    if (!db.objectStoreNames.contains("photos")) db.createObjectStore("photos");
+  };
+  req.onsuccess = function(ev){ idb = ev.target.result; cb(idb); };
+  req.onerror = function(){ toast("Photo storage unavailable", true); cb(null); };
+}
+function photoPut(id, dataURL, cb){
+  openPhotoDB(function(db){
+    if (!db) { if(cb) cb(false); return; }
+    var tx = db.transaction("photos", "readwrite");
+    tx.objectStore("photos").put(dataURL, id);
+    tx.oncomplete = function(){ if(cb) cb(true); };
+    tx.onerror = function(){ toast("Photo save failed — storage full?", true); if(cb) cb(false); };
+  });
+}
+function photoGet(id, cb){
+  openPhotoDB(function(db){
+    if (!db) { cb(null); return; }
+    var req = db.transaction("photos").objectStore("photos").get(id);
+    req.onsuccess = function(){ cb(req.result || null); };
+    req.onerror = function(){ cb(null); };
+  });
+}
+function photoDel(id){
+  openPhotoDB(function(db){
+    if (!db) return;
+    db.transaction("photos", "readwrite").objectStore("photos")["delete"](id);
+  });
+}
+function newPhotoId(){
+  return "p" + Date.now() + "_" + Math.floor(Math.random()*100000);
+}
+/* shrink to max 1280px JPEG so hundreds of photos fit on the iPad */
+function compressImage(file, cb){
+  var reader = new FileReader();
+  reader.onload = function(){
+    var img = new Image();
+    img.onload = function(){
+      var MAX = 1280;
+      var w = img.width, h = img.height;
+      if (w > MAX || h > MAX){
+        if (w >= h){ h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      var cv = document.createElement("canvas");
+      cv.width = w; cv.height = h;
+      cv.getContext("2d").drawImage(img, 0, 0, w, h);
+      cb(cv.toDataURL("image/jpeg", 0.65));
+    };
+    img.onerror = function(){ cb(null); };
+    img.src = reader.result;
+  };
+  reader.onerror = function(){ cb(null); };
+  reader.readAsDataURL(file);
+}
+function load(){
+  var raw = null;
+  try { raw = localStorage.getItem(LS_KEY); } catch(e){}
+  if (raw) {
+    try { DB = JSON.parse(raw); } catch(e){ DB = null; }
+  }
+  if (!DB) {
+    DB = { karts:{}, mechanics:["ROBERT","WESLEY","EMMETT"] };
+    var all = ADULT_KARTS.concat(JR_KARTS);
+    for (var i=0;i<all.length;i++){
+      var k = all[i];
+      var seeded = SEED[k] || {};
+      DB.karts[k] = {
+        status: seeded.status || blankStatus(),
+        entries: seeded.entries || [],
+        knotes: seeded.knotes || ""
+      };
+    }
+  }
+  /* migration for data saved by older versions */
+  if (!DB.meta) DB.meta = { syncUrl:"", lastSync:"" };
+  var allk = ADULT_KARTS.concat(JR_KARTS);
+  for (var m=0;m<allk.length;m++){
+    if (!DB.karts[allk[m]]) DB.karts[allk[m]] = { status: blankStatus(), entries: [], knotes:"" };
+    if (DB.karts[allk[m]].knotes === undefined) DB.karts[allk[m]].knotes = "";
+  }
+  save();
+}
+function save(){
+  try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); }
+  catch(e){ toast("SAVE FAILED — storage full?"); }
+  scheduleSync();
+}
+
+/* ================= GOOGLE SHEET SYNC ================= */
+var syncTimer = null;
+function scheduleSync(){
+  if (!DB || !DB.meta || !DB.meta.syncUrl) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(function(){ syncNow(true); }, 5000);
+}
+function buildSnapshot(){
+  var karts = {};
+  var all = ADULT_KARTS.concat(JR_KARTS);
+  for (var i=0;i<all.length;i++){
+    var k = all[i], src = DB.karts[k];
+    karts[k] = { status: src.status, knotes: src.knotes || "", entries: [] };
+    for (var e=0;e<src.entries.length;e++){
+      var en = src.entries[e];
+      karts[k].entries.push({
+        date: en.date, action: en.action, parts: en.parts,
+        mechanic: en.mechanic, notes: en.notes,
+        photos: (en.photos && en.photos.length) || 0
+      });
+    }
+  }
+  return { type:"snapshot", app:"k1kartlog", karts: karts, parts: PARTS };
+}
+function syncNow(silent){
+  if (!DB.meta.syncUrl){
+    if (!silent) toast("Paste the sync link first", true);
+    return;
+  }
+  if (typeof fetch !== "function"){
+    if (!silent) toast("This browser can't sync — use Excel export", true);
+    return;
+  }
+  var body = JSON.stringify(buildSnapshot());
+  fetch(DB.meta.syncUrl, {
+    method: "POST",
+    mode: "no-cors",
+    headers: { "Content-Type": "text/plain" },
+    body: body
+  }).then(function(){
+    var now = new Date();
+    DB.meta.lastSync = (now.getMonth()+1)+"/"+now.getDate()+"/"+now.getFullYear()+" "+
+      now.getHours()+":"+(now.getMinutes()<10?"0":"")+now.getMinutes();
+    try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); } catch(e){}
+    updateSyncStatus();
+    if (!silent) toast("Sent to Google Sheet");
+  })["catch"](function(){
+    if (!silent) toast("Sync failed — no wifi? Data is safe on this device", true);
+  });
+}
+function updateSyncStatus(){
+  var el = $("syncStatus");
+  if (!el) return;
+  if (!DB.meta.syncUrl){ el.textContent = "Not linked yet."; return; }
+  el.textContent = DB.meta.lastSync ? ("Linked. Last sent: " + DB.meta.lastSync) : "Linked. Nothing sent yet.";
+}
+
+/* ================= HELPERS ================= */
+function $(id){ return document.getElementById(id); }
+function toast(msg, bad){
+  var t = $("toast");
+  t.textContent = msg;
+  t.style.background = bad ? "#c1121f" : "#1d7a3e";
+  t.style.display = "block";
+  clearTimeout(toast._t);
+  toast._t = setTimeout(function(){ t.style.display="none"; }, 2200);
+}
+function todayISO(){
+  var d = new Date();
+  var m = d.getMonth()+1, day = d.getDate();
+  return d.getFullYear()+"-"+(m<10?"0":"")+m+"-"+(day<10?"0":"")+day;
+}
+function isoToUS(iso){
+  if(!iso) return "";
+  var p = iso.split("-");
+  if (p.length!==3) return iso;
+  return parseInt(p[1],10)+"/"+parseInt(p[2],10)+"/"+p[0];
+}
+/* parse M/D/YYYY or YYYY-MM-DD to Date, else null */
+function parseDate(s){
+  if(!s) return null;
+  var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (m) return new Date(+m[1], +m[2]-1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(+m[3], +m[1]-1, +m[2]);
+  return null;
+}
+function daysSince(s){
+  var d = parseDate(s);
+  if(!d) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+
+/* ================= HOME ================= */
+var currentKart = null;
+function renderHome(){
+  renderGrid("gridAdult", ADULT_KARTS, false);
+  renderGrid("gridJr", JR_KARTS, true);
+}
+function renderGrid(elId, list, jr){
+  var el = $(elId); el.innerHTML = "";
+  for (var i=0;i<list.length;i++){
+    (function(k){
+      var b = document.createElement("button");
+      b.className = "kbtn" + (jr ? " jr" : "");
+      var n = DB.karts[k] && DB.karts[k].entries.length;
+      b.innerHTML = k + (n ? '<span class="cnt">'+n+'</span>' : '');
+      b.onclick = function(){ openKart(k); };
+      el.appendChild(b);
+    })(list[i]);
+  }
+}
+
+/* ================= KART DETAIL ================= */
+function openKart(k){
+  currentKart = k;
+  $("kartTitle").textContent = "KART " + k;
+  renderKart();
+  showScreen("scrKart");
+  window.scrollTo(0,0);
+}
+function showScreen(id){
+  var scrs = document.querySelectorAll(".screen");
+  for (var i=0;i<scrs.length;i++) scrs[i].className = scrs[i].className.replace(" active","");
+  $(id).className += " active";
+}
+var SVC_FIELDS = [
+  ["chain","CHAIN"],["diff","DIFF"],["brake","BRAKE FLUSH"]
+];
+var BAT_FIELDS = [["bat1","BAT 1"],["bat2","BAT 2"],["bat3","BAT 3"],["bat4","BAT 4"]];
+
+function svcClass(val){
+  var d = daysSince(val);
+  if (d === null) return "";
+  if (d > 90) return " overdue";
+  if (d > 75) return " soon";
+  return "";
+}
+function renderKart(){
+  var st = DB.karts[currentKart].status;
+  var isJr = +currentKart >= 41;
+  /* service dates */
+  var row = $("svcRow"); row.innerHTML = "";
+  for (var i=0;i<SVC_FIELDS.length;i++){
+    (function(f, label){
+      if (isJr && (f==="diff" || f==="brake")) return; /* juniors: no diff / no hydraulic flush */
+      var d = document.createElement("button");
+      d.className = "schip" + svcClass(st[f]);
+      d.style.border = "1px solid #384060"; d.style.background="#242938"; d.style.color="#fff";
+      d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>";
+      d.onclick = function(){ editDateField(f, label); };
+      row.appendChild(d);
+    })(SVC_FIELDS[i][0], SVC_FIELDS[i][1]);
+  }
+  /* batteries */
+  var brow = $("batRow"); brow.innerHTML = "";
+  var nbat = isJr ? 2 : 4;
+  for (var j=0;j<nbat;j++){
+    (function(f, label){
+      var d = document.createElement("button");
+      d.className = "schip";
+      d.style.border = "1px solid #384060"; d.style.background="#242938"; d.style.color="#fff";
+      d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>";
+      d.onclick = function(){ editTextField(f, label + " date (e.g. 10-25)"); };
+      brow.appendChild(d);
+    })(BAT_FIELDS[j][0], BAT_FIELDS[j][1]);
+  }
+  /* kart notes */
+  var kn = DB.karts[currentKart].knotes || "";
+  var kbox = $("knotesBox");
+  kbox.textContent = kn || "Nothing yet — tap to add what makes this kart special";
+  kbox.className = "knotes" + (kn ? "" : " empty");
+  kbox.onclick = function(){
+    $("knotesTitle").textContent = "Kart " + currentKart + " Notes";
+    $("knotesText").value = DB.karts[currentKart].knotes || "";
+    $("knotesModal").className = "modal open";
+  };
+  $("weldHint").textContent = "Weld count: " + (st.weld || 0) + "  (logs with WELD add 1 automatically — tap here to edit)";
+  $("weldHint").onclick = function(){
+    var v = prompt("Weld count for kart " + currentKart, String(st.weld||0));
+    if (v === null) return;
+    var n = parseInt(v,10);
+    if (!isNaN(n) && n >= 0){ st.weld = n; save(); renderKart(); }
+  };
+  /* history */
+  var hl = $("historyList"); hl.innerHTML = "";
+  var entries = DB.karts[currentKart].entries;
+  if (!entries.length){
+    hl.innerHTML = '<div style="color:#667;padding:16px;text-align:center">No work logged yet</div>';
+  }
+  var sorted = entries.slice().sort(function(a,b){
+    var da = parseDate(a.date), db_ = parseDate(b.date);
+    return (db_?db_.getTime():0) - (da?da.getTime():0);
+  });
+  for (var e=0;e<sorted.length;e++){
+    (function(en){
+      var div = document.createElement("div");
+      div.className = "entry";
+      var h = '<button class="delx">&#10005;</button>' +
+        '<button class="camx">&#128247;+</button>' +
+        '<div class="edate">'+en.date+'</div>' +
+        '<div class="eaction">'+esc(en.action)+'</div>';
+      if (en.parts) h += '<div class="eparts">&#128295; '+esc(en.parts)+'</div>';
+      if (en.mechanic) h += '<div class="emech">by '+esc(en.mechanic)+'</div>';
+      if (en.notes) h += '<div class="enotes">&#9888; '+esc(en.notes)+'</div>';
+      h += '<div class="photorow"></div>';
+      div.innerHTML = h;
+      div.querySelector(".delx").onclick = function(){
+        if (confirm("Delete this entry?\n\n" + en.date + " — " + en.action)){
+          if (en.photos){ for (var p=0;p<en.photos.length;p++) photoDel(en.photos[p]); }
+          var idx = DB.karts[currentKart].entries.indexOf(en);
+          if (idx > -1) DB.karts[currentKart].entries.splice(idx,1);
+          save(); renderKart();
+        }
+      };
+      div.querySelector(".camx").onclick = function(){
+        photoTarget = en;
+        $("photoInput").click();
+      };
+      renderEntryPhotos(en, div.querySelector(".photorow"));
+      hl.appendChild(div);
+    })(sorted[e]);
+  }
+}
+function esc(s){
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+function editDateField(f, label){
+  var st = DB.karts[currentKart].status;
+  var v = prompt(label + " date (M/D/YYYY):", st[f] || "");
+  if (v === null) return;
+  st[f] = v.trim(); save(); renderKart();
+}
+function editTextField(f, label){
+  var st = DB.karts[currentKart].status;
+  var v = prompt(label + ":", st[f] || "");
+  if (v === null) return;
+  st[f] = v.trim(); save(); renderKart();
+}
+
+/* ================= ENTRY PHOTOS ================= */
+var photoTarget = null;   /* "form" while log form is open, else an entry object */
+var pendingPhotos = [];   /* [{id, dataURL}] queued in the form before save */
+
+function renderEntryPhotos(en, rowEl){
+  rowEl.innerHTML = "";
+  if (!en.photos || !en.photos.length) return;
+  for (var i=0;i<en.photos.length;i++){
+    (function(pid){
+      var img = document.createElement("img");
+      img.className = "thumb";
+      photoGet(pid, function(dataURL){
+        if (dataURL) img.src = dataURL;
+        else img.alt = "?";
+      });
+      img.onclick = function(){ openViewer(pid, en); };
+      rowEl.appendChild(img);
+    })(en.photos[i]);
+  }
+}
+function handlePhotoFiles(files){
+  var n = files.length;
+  if (!n) return;
+  toast("Adding " + n + " photo" + (n>1?"s":"") + "...");
+  var done = 0;
+  for (var i=0;i<n;i++){
+    (function(file){
+      compressImage(file, function(dataURL){
+        done++;
+        if (dataURL){
+          var id = newPhotoId();
+          if (photoTarget === "form"){
+            pendingPhotos.push({id:id, dataURL:dataURL});
+            renderFormPhotos();
+          } else if (photoTarget){
+            photoPut(id, dataURL, function(ok){
+              if (ok){
+                if (!photoTarget.photos) photoTarget.photos = [];
+                photoTarget.photos.push(id);
+                save(); renderKart();
+              }
+            });
+          }
+        }
+        if (done === n && photoTarget === "form") toast("Photo added");
+      });
+    })(files[i]);
+  }
+}
+function renderFormPhotos(){
+  var row = $("formPhotos"); row.innerHTML = "";
+  for (var i=0;i<pendingPhotos.length;i++){
+    (function(pp){
+      var wrap = document.createElement("div");
+      wrap.className = "thumbwrap";
+      var img = document.createElement("img");
+      img.className = "thumb"; img.src = pp.dataURL;
+      var rem = document.createElement("button");
+      rem.className = "thumbrem"; rem.innerHTML = "&#10005;";
+      rem.onclick = function(){
+        pendingPhotos.splice(pendingPhotos.indexOf(pp),1);
+        renderFormPhotos();
+      };
+      wrap.appendChild(img); wrap.appendChild(rem);
+      row.appendChild(wrap);
+    })(pendingPhotos[i]);
+  }
+}
+/* full screen viewer */
+var viewerPid = null, viewerEntry = null;
+function openViewer(pid, en){
+  viewerPid = pid; viewerEntry = en;
+  photoGet(pid, function(dataURL){
+    if (!dataURL){ toast("Photo not found", true); return; }
+    $("pvImg").src = dataURL;
+    $("pviewer").className = "open";
+  });
+}
+function closeViewer(){
+  $("pviewer").className = "";
+  $("pvImg").src = "";
+  viewerPid = null; viewerEntry = null;
+}
+
+/* ================= LOG FORM ================= */
+var selectedParts = []; /* [{num, desc, qty}] */
+var selectedMech = "";
+
+function openLog(){
+  selectedParts = [];
+  selectedMech = "";
+  pendingPhotos = [];
+  photoTarget = "form";
+  renderFormPhotos();
+  $("logTitle").textContent = "Log Work — Kart " + currentKart;
+  $("fDate").value = todayISO();
+  $("fAction").value = "";
+  $("fNotes").value = "";
+  $("fPartSearch").value = "";
+  $("partResults").innerHTML = "";
+  renderQuickRow(); renderMechRow(); renderSelParts(); updateAutoNote();
+  $("logModal").className = "modal open";
+}
+function closeLog(){
+  $("logModal").className = "modal";
+  photoTarget = null;
+  pendingPhotos = [];
+}
+
+function renderQuickRow(){
+  var row = $("quickRow"); row.innerHTML = "";
+  for (var i=0;i<QUICK_ACTIONS.length;i++){
+    (function(a){
+      var c = document.createElement("button");
+      c.className = "chip";
+      c.textContent = a;
+      c.onclick = function(){
+        $("fAction").value = a;
+        updateAutoNote();
+        var chips = row.querySelectorAll(".chip");
+        for (var j=0;j<chips.length;j++) chips[j].className = "chip";
+        c.className = "chip on";
+      };
+      row.appendChild(c);
+    })(QUICK_ACTIONS[i]);
+  }
+}
+function renderMechRow(){
+  var row = $("mechRow"); row.innerHTML = "";
+  for (var i=0;i<DB.mechanics.length;i++){
+    (function(m){
+      var c = document.createElement("button");
+      c.className = "chip" + (selectedMech===m ? " on" : "");
+      c.textContent = m;
+      c.onclick = function(){ selectedMech = m; renderMechRow(); };
+      row.appendChild(c);
+    })(DB.mechanics[i]);
+  }
+  var add = document.createElement("button");
+  add.className = "chip"; add.textContent = "+ NEW";
+  add.onclick = function(){
+    var v = prompt("Mechanic name:");
+    if (v && v.trim()){
+      var name = v.trim().toUpperCase();
+      if (DB.mechanics.indexOf(name) === -1) DB.mechanics.push(name);
+      selectedMech = name; save(); renderMechRow();
+    }
+  };
+  row.appendChild(add);
+}
+function searchParts(q){
+  q = q.trim().toUpperCase();
+  var res = $("partResults"); res.innerHTML = "";
+  if (q.length < 2) return;
+  var hits = [];
+  for (var i=0;i<PARTS.length && hits.length<12;i++){
+    var p = PARTS[i];
+    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1) hits.push(p);
+  }
+  if (!hits.length){
+    var div = document.createElement("div");
+    div.className = "partitem";
+    div.innerHTML = '<span class="pd">No match — </span>';
+    var b = document.createElement("button");
+    b.className = "padd"; b.textContent = 'ADD "' + q + '"';
+    b.onclick = function(){ addPart(q, ""); };
+    div.appendChild(b);
+    res.appendChild(div);
+    return;
+  }
+  for (var h=0;h<hits.length;h++){
+    (function(p){
+      var div = document.createElement("div");
+      div.className = "partitem";
+      div.innerHTML = '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(p[1])+'</span>';
+      var b = document.createElement("button");
+      b.className = "padd"; b.textContent = "ADD";
+      b.onclick = function(){ addPart(p[0], p[1]); };
+      div.appendChild(b);
+      res.appendChild(div);
+    })(hits[h]);
+  }
+}
+function addPart(num, desc){
+  for (var i=0;i<selectedParts.length;i++){
+    if (selectedParts[i].num === num){ selectedParts[i].qty++; renderSelParts(); return; }
+  }
+  selectedParts.push({num:num, desc:desc, qty:1});
+  $("fPartSearch").value = "";
+  $("partResults").innerHTML = "";
+  renderSelParts();
+}
+function renderSelParts(){
+  var el = $("selParts"); el.innerHTML = "";
+  for (var i=0;i<selectedParts.length;i++){
+    (function(sp){
+      var div = document.createElement("div");
+      div.className = "selpart";
+      var lbl = document.createElement("span");
+      lbl.className = "spn"; lbl.textContent = sp.num;
+      var minus = document.createElement("button");
+      minus.className="qbtn"; minus.textContent="−";
+      minus.onclick = function(){ if(sp.qty>1){sp.qty--; renderSelParts();} };
+      var qn = document.createElement("span"); qn.className="qnum"; qn.textContent = "x"+sp.qty;
+      var plus = document.createElement("button");
+      plus.className="qbtn"; plus.textContent="+";
+      plus.onclick = function(){ sp.qty++; renderSelParts(); };
+      var rem = document.createElement("button");
+      rem.className="sprem"; rem.innerHTML="&#10005;";
+      rem.onclick = function(){
+        selectedParts.splice(selectedParts.indexOf(sp),1); renderSelParts();
+      };
+      div.appendChild(lbl); div.appendChild(minus); div.appendChild(qn);
+      div.appendChild(plus); div.appendChild(rem);
+      el.appendChild(div);
+    })(selectedParts[i]);
+  }
+}
+function detectAutoUpdates(action){
+  var a = action.toUpperCase();
+  var ups = [];
+  if (a.indexOf("BRAKE FLUSH") > -1) ups.push(["brake","BRAKE FLUSH date"]);
+  if (a.indexOf("CHAIN") > -1) ups.push(["chain","CHAIN date"]);
+  if (a.indexOf("DIFF") > -1) ups.push(["diff","DIFF date"]);
+  if (a.indexOf("WELD") > -1) ups.push(["weld","weld count +1"]);
+  return ups;
+}
+function updateAutoNote(){
+  var ups = detectAutoUpdates($("fAction").value);
+  var el = $("autoNote");
+  if (!ups.length){ el.textContent = ""; return; }
+  var labels = [];
+  for (var i=0;i<ups.length;i++) labels.push(ups[i][1]);
+  el.textContent = "Saving will auto-update: " + labels.join(", ");
+}
+function saveLog(){
+  var dateISO = $("fDate").value;
+  var action = $("fAction").value.trim();
+  if (!dateISO){ toast("Pick a date", true); return; }
+  if (!action){ toast("Enter what was done", true); return; }
+  if (!selectedMech){ toast("Pick the mechanic", true); return; }
+  var dateUS = isoToUS(dateISO);
+  var partsStr = "";
+  for (var i=0;i<selectedParts.length;i++){
+    if (i) partsStr += ", ";
+    partsStr += selectedParts[i].num + " x" + selectedParts[i].qty;
+  }
+  var entry = { date: dateUS, action: action, parts: partsStr,
+                mechanic: selectedMech, notes: $("fNotes").value.trim(), photos: [] };
+  for (var p=0;p<pendingPhotos.length;p++){
+    photoPut(pendingPhotos[p].id, pendingPhotos[p].dataURL);
+    entry.photos.push(pendingPhotos[p].id);
+  }
+  DB.karts[currentKart].entries.push(entry);
+  /* auto updates */
+  var st = DB.karts[currentKart].status;
+  var ups = detectAutoUpdates(action);
+  for (var u=0;u<ups.length;u++){
+    if (ups[u][0] === "weld") st.weld = (st.weld||0) + 1;
+    else st[ups[u][0]] = dateUS;
+  }
+  save();
+  closeLog();
+  renderKart(); renderHome();
+  toast("Saved — Kart " + currentKart);
+}
+
+/* ================= EXPORT ================= */
+var HDR = ["DATE","ACTION COMPLETED","parts used","MECHANIC","NOTES",
+  "CHAIN DATE","DIFF DATE","BRAKE FLUSH","BAT 1 DATE","BAT 2 DATE","BAT 3 DATE","BAT 4 DATE",
+  "WELD","WELD COUNT"];
+
+function partsUsedRows(){
+  var desc = {};
+  for (var p=0;p<PARTS.length;p++) desc[PARTS[p][0].toUpperCase()] = PARTS[p][1];
+  var tot = {}, last = {};
+  var all = ADULT_KARTS.concat(JR_KARTS);
+  for (var i=0;i<all.length;i++){
+    var es = DB.karts[all[i]].entries;
+    for (var j=0;j<es.length;j++){
+      var en = es[j];
+      if (!en.parts) continue;
+      var items = String(en.parts).split(",");
+      for (var t=0;t<items.length;t++){
+        var it = items[t].trim();
+        if (!it) continue;
+        var m = it.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+        var num = m ? m[1].trim().toUpperCase() : it.toUpperCase();
+        var qty = m ? (parseInt(m[2],10) || 1) : 1;
+        tot[num] = (tot[num]||0) + qty;
+        var d = parseDate(en.date);
+        if (d && (!last[num] || d > last[num])) last[num] = d;
+      }
+    }
+  }
+  var rows = [["PART NUMBER","DESCRIPTION","TOTAL USED","LAST USED"]];
+  var nums = [];
+  for (var n in tot) nums.push(n);
+  nums.sort(function(a,b){ return tot[b]-tot[a]; });
+  for (var q=0;q<nums.length;q++){
+    var nm = nums[q];
+    var lu = last[nm] ? (last[nm].getMonth()+1)+"/"+last[nm].getDate()+"/"+last[nm].getFullYear() : "";
+    rows.push([nm, desc[nm]||"", tot[nm], lu]);
+  }
+  return rows;
+}
+function buildWorkbook(){
+  var wb = XLSX.utils.book_new();
+  var all = ADULT_KARTS.concat(JR_KARTS);
+  /* ALL DATES summary first */
+  var sumRows = [["KART","CHAIN","DIFF","BRAKE FLUSH","BAT 1","BAT 2","BAT 3","BAT 4","WELD COUNT","KART NOTES"]];
+  for (var s=0;s<all.length;s++){
+    var stt = DB.karts[all[s]].status;
+    sumRows.push([all[s], stt.chain, stt.diff, stt.brake, stt.bat1, stt.bat2, stt.bat3, stt.bat4, stt.weld||0, DB.karts[all[s]].knotes||""]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), "ALL DATES");
+  /* parts used (inventory) */
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(partsUsedRows()), "PARTS USED");
+  /* per-kart sheets */
+  for (var i=0;i<all.length;i++){
+    var k = all[i];
+    var st = DB.karts[k].status;
+    var rows = [HDR];
+    rows.push(["","","","", DB.karts[k].knotes||"", st.chain, st.diff, st.brake, st.bat1, st.bat2, st.bat3, st.bat4,
+      "", st.weld||0]);
+    var entries = DB.karts[k].entries.slice().sort(function(a,b){
+      var da = parseDate(a.date), db_ = parseDate(b.date);
+      return (da?da.getTime():0) - (db_?db_.getTime():0);
+    });
+    for (var e=0;e<entries.length;e++){
+      var en = entries[e];
+      var notes = en.notes || "";
+      var np = (en.photos && en.photos.length) || 0;
+      if (np) notes = (notes ? notes + " " : "") + "[" + np + " photo" + (np>1?"s":"") + " in app]";
+      rows.push([en.date, en.action, en.parts, en.mechanic, notes]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), k);
+  }
+  return wb;
+}
+function downloadXlsx(){
+  try {
+    var wb = buildWorkbook();
+    XLSX.writeFile(wb, "kart_log_" + todayISO() + ".xlsx");
+    toast("Excel file created");
+  } catch(err){
+    toast("Export failed: " + err.message, true);
+  }
+}
+
+/* ================= BACKUP ================= */
+function doBackup(){
+  var out = $("backupOut");
+  out.style.display = "block";
+  out.value = JSON.stringify(DB);
+  out.focus(); out.select();
+  var ok = false;
+  try { ok = document.execCommand("copy"); } catch(e){}
+  toast(ok ? "Backup copied — paste it somewhere safe" : "Select-all and copy the text below");
+}
+function doImport(){
+  var txt = $("importText").value.trim();
+  if (!txt){ toast("Paste backup text first", true); return; }
+  try {
+    var obj = JSON.parse(txt);
+    if (!obj.karts) throw new Error("not a kart log backup");
+    if (!confirm("Replace ALL current data with this backup?")) return;
+    DB = obj; save();
+    renderHome();
+    toast("Backup restored");
+    $("importText").value = "";
+  } catch(e){
+    toast("Bad backup text: " + e.message, true);
+  }
+}
+
+/* ================= WIRE UP ================= */
+$("btnBack").onclick = function(){ showScreen("scrHome"); renderHome(); };
+$("btnBack2").onclick = function(){ showScreen("scrHome"); renderHome(); };
+$("btnExportScr").onclick = function(){
+  var ml = ""; for (var i=0;i<DB.mechanics.length;i++){ if(i) ml += ", "; ml += DB.mechanics[i]; }
+  $("mechList").textContent = ml;
+  $("syncUrl").value = DB.meta.syncUrl || "";
+  updateSyncStatus();
+  showScreen("scrExport");
+};
+$("btnLog").onclick = openLog;
+$("btnLogTop").onclick = openLog;
+$("btnCancelLog").onclick = closeLog;
+$("btnSaveLog").onclick = saveLog;
+$("btnXlsx").onclick = downloadXlsx;
+$("btnBackup").onclick = doBackup;
+$("btnShowImport").onclick = function(){
+  var a = $("importArea");
+  a.style.display = a.style.display === "none" ? "block" : "none";
+};
+$("btnImport").onclick = doImport;
+$("btnAddMech").onclick = function(){
+  var v = prompt("Mechanic name:");
+  if (v && v.trim()){
+    var name = v.trim().toUpperCase();
+    if (DB.mechanics.indexOf(name) === -1) DB.mechanics.push(name);
+    save();
+    var ml = ""; for (var i=0;i<DB.mechanics.length;i++){ if(i) ml += ", "; ml += DB.mechanics[i]; }
+    $("mechList").textContent = ml;
+  }
+};
+$("fPartSearch").addEventListener("input", function(){ searchParts(this.value); });
+$("fAction").addEventListener("input", updateAutoNote);
+$("btnAddPhoto").onclick = function(){ photoTarget = "form"; $("photoInput").click(); };
+$("photoInput").addEventListener("change", function(){
+  handlePhotoFiles(this.files);
+  this.value = "";
+});
+$("btnKnotesCancel").onclick = function(){ $("knotesModal").className = "modal"; };
+$("btnKnotesSave").onclick = function(){
+  DB.karts[currentKart].knotes = $("knotesText").value.trim();
+  save();
+  $("knotesModal").className = "modal";
+  renderKart();
+  toast("Kart notes saved");
+};
+$("btnSaveSync").onclick = function(){
+  DB.meta.syncUrl = $("syncUrl").value.trim();
+  save(); updateSyncStatus();
+  toast(DB.meta.syncUrl ? "Link saved" : "Link cleared");
+};
+$("btnSyncNow").onclick = function(){ syncNow(false); };
+$("pvClose").onclick = closeViewer;
+$("pvImg").onclick = closeViewer;
+$("pvDelete").onclick = function(){
+  if (!viewerPid || !viewerEntry) { closeViewer(); return; }
+  if (!confirm("Delete this photo?")) return;
+  var idx = viewerEntry.photos.indexOf(viewerPid);
+  if (idx > -1) viewerEntry.photos.splice(idx,1);
+  photoDel(viewerPid);
+  save(); closeViewer(); renderKart();
+};
+
+load();
+renderHome();
+</script>
+</body>
+</html>

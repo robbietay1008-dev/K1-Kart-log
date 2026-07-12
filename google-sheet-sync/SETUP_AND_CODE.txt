@@ -1,0 +1,171 @@
+K1 KART LOG — GOOGLE SHEET LIVE SYNC — ONE-TIME SETUP
+======================================================
+
+Do this once, on a computer (not the iPad):
+
+ 1. Go to sheets.google.com and log in with your gmail
+    (robbietay1008@gmail.com). Open the sheet called
+    "karts_log__with_photos_".
+ 2. In the top menu click:  Extensions  ->  Apps Script
+ 3. A code editor opens. Delete anything already in it, then
+    copy-paste EVERYTHING below the ==CODE== line at the bottom
+    of this file. Click the floppy-disk Save icon.
+ 4. Click the blue "Deploy" button (top right) -> New deployment
+ 5. Click the gear icon next to "Select type" -> choose "Web app"
+ 6. Set it like this:
+       Description:     kart log sync
+       Execute as:      Me
+       Who has access:  Anyone          <-- important
+    Click Deploy.
+ 7. It will ask to Authorize. Pick your gmail account. If Google
+    shows a warning screen, click "Advanced" then "Go to ...
+    (unsafe)" — it's your own script, it's fine.
+ 8. Copy the "Web app" URL it shows (starts with
+    https://script.google.com/macros/s/... and ends in /exec).
+ 9. On the iPad, open the kart log app -> Export -> paste that
+    URL into the "Google Sheet Live Sync" box -> Save Link ->
+    then hit "Sync to Google Sheet Now" to test.
+10. Check the Google Sheet — three new tabs appear:
+       APP ALL DATES    every kart's chain/diff/brake/battery
+                        dates, weld count, and kart notes
+       APP LOG          every work entry, all karts, one list
+       APP PARTS USED   running inventory count of every part
+                        number the mechanics have logged
+    From then on, every log/date/note saved in the app updates
+    these tabs on its own (the iPad needs wifi; if it's offline,
+    nothing is lost — it sends next time someone hits Sync Now
+    or saves while online).
+
+Notes:
+ - The script only writes to those three APP tabs. Your original
+   kart tabs (1-53) and everything else are never touched.
+ - Keep the web app URL private — anyone with it could write to
+   those three tabs.
+ - If you ever redo the deployment, you get a NEW URL — paste the
+   new one into the app.
+
+==CODE== (copy everything below this line)
+
+/** K1 Kart Log -> Google Sheet receiver. Writes 3 tabs:
+ *  APP ALL DATES, APP LOG, APP PARTS USED. Never touches other tabs. */
+
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    if (!data || data.app !== 'k1kartlog' || !data.karts) {
+      return txt('ignored');
+    }
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try {
+      writeAllDates(ss, data);
+      writeLog(ss, data);
+      writePartsUsed(ss, data);
+    } finally {
+      lock.releaseLock();
+    }
+    return txt('ok');
+  } catch (err) {
+    return txt('error: ' + err);
+  }
+}
+
+function doGet() { return txt('kart log sync is running'); }
+
+function txt(s) { return ContentService.createTextOutput(s); }
+
+function freshSheet(ss, name, textCols) {
+  var sh = ss.getSheetByName(name);
+  if (!sh) sh = ss.insertSheet(name);
+  sh.clearContents();
+  if (textCols) {
+    for (var i = 0; i < textCols.length; i++) {
+      sh.getRange(textCols[i] + ':' + textCols[i]).setNumberFormat('@');
+    }
+  }
+  return sh;
+}
+
+function kartOrder(karts) {
+  return Object.keys(karts).sort(function (a, b) { return (+a) - (+b); });
+}
+
+function writeAllDates(ss, data) {
+  // battery columns as text so "8-24" stays "8-24"
+  var sh = freshSheet(ss, 'APP ALL DATES', ['E', 'F', 'G', 'H']);
+  var rows = [['KART', 'CHAIN', 'DIFF', 'BRAKE FLUSH',
+               'BAT 1', 'BAT 2', 'BAT 3', 'BAT 4', 'WELD COUNT', 'KART NOTES']];
+  var ks = kartOrder(data.karts);
+  for (var i = 0; i < ks.length; i++) {
+    var k = ks[i];
+    var st = data.karts[k].status || {};
+    rows.push([k, st.chain || '', st.diff || '', st.brake || '',
+               st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '',
+               st.weld || 0, data.karts[k].knotes || '']);
+  }
+  sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+function writeLog(ss, data) {
+  var sh = freshSheet(ss, 'APP LOG', ['D']); // parts column as text
+  var rows = [['DATE', 'KART', 'ACTION COMPLETED', 'PARTS USED',
+               'MECHANIC', 'NOTES', 'PHOTOS']];
+  var ks = kartOrder(data.karts);
+  var all = [];
+  for (var i = 0; i < ks.length; i++) {
+    var es = data.karts[ks[i]].entries || [];
+    for (var j = 0; j < es.length; j++) {
+      var en = es[j];
+      all.push([en.date || '', ks[i], en.action || '', en.parts || '',
+                en.mechanic || '', en.notes || '',
+                en.photos ? en.photos + ' in app' : '']);
+    }
+  }
+  all.sort(function (a, b) {
+    var da = new Date(a[0]), db = new Date(b[0]);
+    var d = da - db;
+    if (d) return d;
+    return (+a[1]) - (+b[1]);
+  });
+  rows = rows.concat(all);
+  sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+}
+
+function writePartsUsed(ss, data) {
+  var sh = freshSheet(ss, 'APP PARTS USED', ['A']); // part numbers as text
+  var desc = {};
+  if (data.parts) {
+    for (var p = 0; p < data.parts.length; p++) {
+      desc[String(data.parts[p][0]).toUpperCase()] = data.parts[p][1];
+    }
+  }
+  var tot = {}, last = {};
+  var ks = Object.keys(data.karts);
+  for (var i = 0; i < ks.length; i++) {
+    var es = data.karts[ks[i]].entries || [];
+    for (var j = 0; j < es.length; j++) {
+      var en = es[j];
+      if (!en.parts) continue;
+      var items = String(en.parts).split(',');
+      for (var t = 0; t < items.length; t++) {
+        var it = items[t].trim();
+        if (!it) continue;
+        var m = it.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+        var num = m ? m[1].trim().toUpperCase() : it.toUpperCase();
+        var qty = m ? (parseInt(m[2], 10) || 1) : 1;
+        tot[num] = (tot[num] || 0) + qty;
+        var d = new Date(en.date);
+        if (!isNaN(d.getTime()) && (!last[num] || d > last[num])) last[num] = d;
+      }
+    }
+  }
+  var rows = [['PART NUMBER', 'DESCRIPTION', 'TOTAL USED', 'LAST USED']];
+  var nums = Object.keys(tot).sort(function (a, b) { return tot[b] - tot[a]; });
+  for (var n = 0; n < nums.length; n++) {
+    var nm = nums[n];
+    rows.push([nm, desc[nm] || '', tot[nm],
+               last[nm] ? Utilities.formatDate(last[nm], ss.getSpreadsheetTimeZone(), 'M/d/yyyy') : '']);
+  }
+  sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+}
