@@ -1,119 +1,14 @@
 #!/usr/bin/env python3
-"""Build seed JSON (current status from the ALL DATES tab + history for karts 2-4)
-and assemble the final single-file app."""
-import json, re
+"""Assemble the final single-file app.
+Seed data comes from seed_full.json (extracted from the shop's Excel workbook
+by extract step — full history for all 53 karts)."""
+import json
 
-# kart: (bat1,bat2,bat3,bat4, chain, diff, brake)  -- "?" or comment -> ""
-Q = ""
-def c(v):
-    v = v.strip()
-    return "" if v in ("?", "x", "SD", "N/A", "") else v
+seed = json.load(open("seed_full.json", encoding="utf-8"))
+print("seeded karts:", len(seed), " entries:", sum(len(v["entries"]) for v in seed.values()))
 
-STATUS = {
- "1":  ("N/A","N/A","N/A","N/A","","",""),
- "2":  ("?","8-24","10-25","11-24","4/2/2026","4/2/2026","1/29/2026"),
- "3":  ("11-24","11-24","10-25","11-24","1/19/2026","1/19/2026","1/19/2026"),
- "4":  ("11-24","11-24","11-24","11-24","3/24/2026","?","1/29/2026"),
- "5":  ("1-26","1-26","1-26","1-26","4/5/2026","4/5/2026","1/30/2026"),
- "6":  ("?","?","10-25","10-25","?","?","1/31/2026"),
- "7":  ("10-25","10-25","10-25","10-25","?","?","2/10/2026"),
- "8":  ("?","?","?","?","2/24/2026","1/2/2026","1/30/2026"),
- "9":  ("?","4-24","?","2-24","?","12/24/2025","12/24/2025"),
- "10": ("?","5-24","5-24","5-24","?","12/24/2025","?"),
- "11": ("01-26","1-26","01-26","1-26","?","?","2/13/2026"),
- "12": ("8-24","7-24","7-24","7-24","4/16/2026","?","2/13/2026"),
- "13": ("?","?","2-24","2-24","5/14/2026","5/14/2026","2/13/2026"),
- "14": ("?","?","?","?","3/12/2026","3/12/2026","3/12/2026"),
- "15": ("6-25","6-25","6-25","6-25","1/3/2026","1/3/2026","12/30/2025"),
- "16": ("4-25","4-25","4-25","4-25","?","?","2/14/2026"),
- "17": ("10-25","10-25","10-25","10-25","6/18/2026","6/18/2026","6/9/2026"),
- "18": ("5-24","5-24","8-24","6-23","?","?","?"),
- "19": ("8-24","8-24","8-24","8-24","3/20/2026","?","2/14/2026"),
- "20": ("6-25","6-25","6-25","6-25","?","12/26/2025","12/26/2025"),
- "21": ("4/25","4/25","4/25","4/25","?","?","?"),
- "22": ("8/24","2/24","7/24","7/24","?","12/26/2025","2/14/2026"),
- "23": ("?","?","?","?","?","?","?"),
- "24": ("?","?","?","?","4/4/2026","?","6/4/2026"),
- "25": ("?","?","?","?","4/18/2026","?","?"),
- "26": ("7-22","7-22","7-22","7-22","?","?","3/13/2026"),
- "27": ("4-25","4-25","4-25","7-24","1/10/2026","1/10/2026","?"),
- "28": ("6-25","6-25","6-25","6-25","2/17/2026","2/17/2026","2/28/2026"),
- "29": ("5-24","5-24","5-24","7-24","4/8/2026","4/8/2026","?"),
- "30": ("2-24","5-24","5-24","5-24","?","?","?"),
- "31": ("4-22","4-22","7-24","7-24","?","?","?"),
- "32": ("10-25","10-25","10-25","10-25","?","?","3/27/2026"),
- "33": ("11-24","11-24","11-24","11-24","?","?","?"),
- "34": ("4-25","4-25","4-25","4-25","?","?","?"),
- "35": ("","","","","N/A","N/A","N/A"),
- "36": ("","","","","N/A","N/A","N/A"),
- "37": ("4-25","?","4-25","7-24","?","?","3/27/2026"),
- "38": ("?","?","7-23","7-23","12/31/2025","?","2/28/2026"),
- "39": ("?","?","?","","5/3/2026","5/1/2026","4/13/2026"),
- "40": ("","","","","N/A","N/A","N/A"),
- "41": ("?","?","","","?","N/A","N/A"),
- "42": ("1-26","1-26","","","?","N/A","N/A"),
- "43": ("?","?","","","?","N/A","N/A"),
- "44": ("?","?","","","?","N/A","N/A"),
- "45": ("?","?","","","?","N/A","N/A"),
- "46": ("4-25","4-25","","","?","N/A","N/A"),
- "47": ("6/22","6/22","","","?","N/A","N/A"),
- "48": ("12/21","12/21","","","?","N/A","N/A"),
- "49": ("2-24","7-23","","","?","N/A","N/A"),
- "50": ("12-22","07-23","","","?","N/A","N/A"),
- "51": ("5-24","5-24","","","?","N/A","N/A"),
- "52": ("6-25","6-25","","","?","N/A","N/A"),
- "53": ("?","?","","","?","N/A","N/A"),
-}
-
-def E(date, action, parts="", mech="", notes=""):
-    return {"date": date, "action": action, "parts": parts,
-            "mechanic": mech.upper(), "notes": notes}
-
-ENTRIES = {
- "2": [
-   E("1/29/2026","BRAKE FLUSH","","ROBERT"),
-   E("4/1/2026","FL Replaced","SAK-6011-5-MED x1","WESLEY"),
-   E("4/2/2026","start rear end rework","59695 x1","ROBERT"),
-   E("4/2/2026","replace chain","59687 x1","ROBERT"),
-   E("4/4/2026","finish rear end rework","59682 x4","ROBERT"),
-   E("4/5/2026","brake flush and pad replaced","60038 x2","EMMETT"),
-   E("4/18/2026","replace bottom brake cable","59014 x1","ROBERT"),
-   E("4/20/2026","Fuses","059477 x1, 059462 x1","WESLEY"),
-   E("5/24/2026","full rear end rework",
-     "59694 x4, 59485 x1, 60127 x1, 1110475-DUO/SL x1, 60125 x1, 60126 x1, 60129 x5, 60130 x8, 60134 x1","ROBERT"),
-   E("5/25/2026","2 bearings for diff","59746 x2","WESLEY"),
- ],
- "3": [
-   E("1/19/2026","BRAKE PIN REPLACE ADDED ELECTRICAL TAPE TO MIDDLE OF PIN","","ROBERT","WATCH L BRAKE PINS"),
-   E("1/19/2026","REPLACE DIFF","","ROBERT"),
-   E("2/10/2026","REPLACE BAT 3","59191 x1","ROBERT"),
-   E("4/1/2026","FL Tire","SAK-6011-5-MED x1","WESLEY"),
-   E("5/25/2026","accel cable","59014 x1","WESLEY"),
-   E("6/9/2026","Replaced accelerator and lever","60279 x1","WESLEY","watch BR tire life low"),
- ],
- "4": [
-   E("3/3/2026","BRAKE FLUSH","","ROBERT"),
-   E("3/24/2026","REPLACE CHAIN","59687 x1, 59686 x1","ROBERT"),
-   E("3/24/2026","START REAR-END REBUILD","59682 x4","ROBERT"),
-   E("3/26/2026","finish rebuild","","ROBERT"),
-   E("4/3/2026","Adjustable C","59771 x1, 59787 x2",""),
-   E("5/9/2026","Cable replaced","59014 x1","WESLEY"),
- ],
-}
-
-KNOTES = {
-    "3": "WATCH L BRAKE PINS. Watch BR tire life low.",
-}
-
-seed = {}
-for k, (b1,b2,b3,b4,ch,df,br) in STATUS.items():
-    seed[k] = {
-        "status": {"chain": c(ch), "diff": c(df), "brake": c(br),
-                   "bat1": c(b1), "bat2": c(b2), "bat3": c(b3), "bat4": c(b4),
-                   "weld": 0},
-        "entries": ENTRIES.get(k, []),
-        "knotes": KNOTES.get(k, "")
-    }
+# canonical mechanic chips (entry history keeps whatever spelling was recorded)
+MECHANICS = ["ROBERT", "WESLEY", "EMMETT", "JOHN"]
 
 parts = []
 for line in open("parts_raw.txt", encoding="utf-8"):
@@ -121,13 +16,16 @@ for line in open("parts_raw.txt", encoding="utf-8"):
     if not line or "|" not in line: continue
     num, desc = line.split("|", 1)
     parts.append([num.strip(), desc.strip()])
-print("parts:", len(parts), " seeded karts:", len(seed))
+print("parts:", len(parts))
 
 tpl = open("app_template.html", encoding="utf-8").read()
 sheetjs = open("sheetjs.min.js", encoding="utf-8").read()
 out = tpl.replace("/*__PARTS__*/[]", json.dumps(parts, separators=(",",":")))
 out = out.replace("/*__SEED__*/{}", json.dumps(seed, separators=(",",":")))
+assert 'mechanics:["ROBERT","WESLEY","EMMETT"]' in out
+out = out.replace('mechanics:["ROBERT","WESLEY","EMMETT"]',
+                  'mechanics:' + json.dumps(MECHANICS, separators=(",",":")))
 i = out.find("/*__SHEETJS__*/")
 out = out[:i] + sheetjs + out[i+len("/*__SHEETJS__*/"):]
 open("kart_log.html", "w", encoding="utf-8").write(out)
-print("wrote kart_log.html", len(out), "bytes")
+print("wrote kart_log.html", len(out), "chars")
