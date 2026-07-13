@@ -28,7 +28,6 @@ function handlePost(e) {
         writeLog(ss, data, photoIndex);
         writePartsUsed(ss, data);
         writeKartTabs(ss, data);
-        feedPartsUsedTab(ss, data);
         writeInventoryQty(ss, data.inv);
         writeNeeded(ss, data.inv);
         ensureOrderView(ss);
@@ -67,23 +66,30 @@ function txt(s) { return ContentService.createTextOutput(s); }
 /* ================= ONE-TIME CLEANUP (run manually once) ================= */
 function cleanupImpl() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  // delete obsolete tabs
-  ['EXAMPLE', 'ALL DATES'].forEach(function (n) {
-    var sh = ss.getSheetByName(n);
-    if (sh) ss.deleteSheet(sh);
-  });
-  // desired visible order
+  var goners = ['EXAMPLE', 'ALL DATES', 'Restocks', 'needed', 'ordering',
+                '_invState', 'parts used', 'full', '1', '35', '36'];
+  var deleted = [];
+  for (var g = 0; g < goners.length; g++) {
+    var sh = ss.getSheetByName(goners[g]);
+    if (sh) { ss.deleteSheet(sh); deleted.push(goners[g]); }
+  }
+  var karts = [];
+  for (var i = 2; i <= 53; i++) if (i !== 35 && i !== 36) karts.push(String(i));
   var order = ['APP ALL DATES', 'APP LOG', 'APP PARTS USED', 'APP PHOTOS',
-               'inventory', 'full', 'parts used', 'Restocks', 'needed', 'ordering']
-              .concat(KART_TABS).concat(['template', '_invState']);
+               'APP NEEDED', 'APP ORDER', 'APP ORDERS', 'inventory']
+              .concat(karts).concat(['template']);
   var pos = 1;
-  for (var i = 0; i < order.length; i++) {
-    var sh = ss.getSheetByName(order[i]);
-    if (!sh) continue;
-    ss.setActiveSheet(sh, true);
+  for (var j = 0; j < order.length; j++) {
+    var sh2 = ss.getSheetByName(order[j]);
+    if (!sh2) continue;
+    ss.setActiveSheet(sh2, true);
     ss.moveActiveSheet(pos++);
   }
   ss.setActiveSheet(ss.getSheetByName('APP ALL DATES') || ss.getSheets()[0], true);
+  try {
+    SpreadsheetApp.getUi().alert('Cleanup done. Deleted: ' +
+      (deleted.length ? deleted.join(', ') : 'nothing (already clean)') + '.');
+  } catch (err) {}
 }
 
 /* ================= hidden-tab JSON storage ================= */
@@ -242,41 +248,6 @@ function writeKartTabs(ss, data) {
     sh.getRange(1, 1, 1, KART_HDR.length).setFontWeight('bold');
   }
 }
-function entryKey(kind, who, en) {
-  return kind + '|' + who + '|' + (en.date || '') + '|' + (en.action || en.usedFor || '') + '|' + (en.parts || '');
-}
-function feedPartsUsedTab(ss, data) {
-  var sh = ss.getSheetByName('parts used');
-  if (!sh) return; // user removed it; skip silently
-  var seen = loadJson('pu_index', {});
-  var newRows = [];
-  var ks = kartOrder(data.karts);
-  for (var i = 0; i < ks.length; i++) {
-    var es = data.karts[ks[i]].entries || [];
-    for (var j = 0; j < es.length; j++) {
-      var en = es[j];
-      if (!en.parts) continue;
-      var key = entryKey('K', ks[i], en);
-      if (seen[key]) continue;
-      seen[key] = 1;
-      newRows.push([en.date || '', 'KART ' + ks[i] + ' — ' + (en.action || ''), en.parts]);
-    }
-  }
-  var shop = data.shop || [];
-  for (var s = 0; s < shop.length; s++) {
-    var se = shop[s];
-    if (!se.parts) continue;
-    var key2 = entryKey('S', 'shop', se);
-    if (seen[key2]) continue;
-    seen[key2] = 1;
-    newRows.push([se.date || '', se.usedFor || 'SHOP', se.parts]);
-  }
-  if (newRows.length) {
-    var start = sh.getLastRow() + 1;
-    sh.getRange(start, 1, newRows.length, 3).setValues(newRows);
-  }
-  saveJson('pu_index', seen);
-}
 function photoCell(photos, index) {
   if (!photos) return '';
   if (typeof photos === 'number') return photos ? photos + ' in app' : '';
@@ -361,6 +332,8 @@ function buildMenu() {
   SpreadsheetApp.getUi().createMenu('K1 Kart Log')
     .addItem('Phase 2 → Place order (move checked to APP ORDERS)', 'placeOrder')
     .addItem('Book received quantities into stock', 'bookReceived')
+    .addSeparator()
+    .addItem('Run sheet cleanup (delete retired tabs)', 'cleanupSheet')
     .addToUi();
 }
 
