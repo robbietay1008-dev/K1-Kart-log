@@ -1343,6 +1343,10 @@ $("pvDelete").onclick = function(){
 
 load();
 renderHome();
+/* flush any backlog every time the app opens (e.g. after offline logging) */
+setTimeout(function(){
+  if (DB.meta.syncUrl){ syncNow(true); }
+}, 2500);
 </script>
 </body>
 </html>
