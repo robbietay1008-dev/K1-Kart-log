@@ -280,7 +280,7 @@
   </div>
   <div class="exportcard">
     <h3>Quick Picks</h3>
-    <p>The one-tap job buttons in the log form, with the parts they pre-fill. Parts format: <b>59687 x1, 59686 x1</b> — always part number then x-quantity.</p>
+    <p>The one-tap job buttons in the log form, and the parts each one pre-fills.</p>
     <div id="qpList"></div>
     <button class="hbtn" id="btnAddQp">+ Add Quick Pick</button>
   </div>
@@ -349,8 +349,10 @@
     <div class="mtitle" id="qpTitle">Edit Quick Pick</div>
     <label class="f">BUTTON LABEL (also becomes the action text)</label>
     <input type="text" class="in" id="qpLabel" placeholder="e.g. REPLACE CHAIN">
-    <label class="f">AUTO-FILLED PARTS (optional)</label>
-    <input type="text" class="in" id="qpParts" placeholder="e.g. 59687 x1, 59686 x1">
+    <label class="f">AUTO-FILLED PARTS (optional) — search and tap ADD</label>
+    <input type="search" class="in" id="qpPartSearch" placeholder="Type: chains, 59687 ...">
+    <div class="partresults" id="qpPartResults"></div>
+    <div class="selparts" id="qpSelParts"></div>
     <div class="mactions">
       <button class="hbtn" id="btnQpCancel">Cancel</button>
       <button class="hbtn red" id="btnQpSave">SAVE</button>
@@ -1348,6 +1350,57 @@ $("btnShowImport").onclick = function(){
 };
 $("btnImport").onclick = doImport;
 var qpEditIndex = -1;
+var qpParts = [];
+function searchQpParts(q){
+  q = q.trim().toUpperCase();
+  var res = $("qpPartResults"); res.innerHTML = "";
+  if (q.length < 2) return;
+  var hits = [];
+  for (var i=0;i<PARTS.length && hits.length<12;i++){
+    var p = PARTS[i];
+    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1 ||
+        (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
+  }
+  function addRow(num, desc, label, thumbIdx){
+    var div = document.createElement("div");
+    div.className = "partitem";
+    var th = (thumbIdx >= 0 && THUMBS[thumbIdx]) ? '<img class="pthumb" src="'+THUMBS[thumbIdx]+'">' : '';
+    div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+'</span>';
+    var b = document.createElement("button");
+    b.className = "padd"; b.textContent = label || "ADD";
+    b.onclick = function(){
+      for (var s=0;s<qpParts.length;s++){
+        if (qpParts[s].num === num){ qpParts[s].qty++; renderQpSelParts(); return; }
+      }
+      qpParts.push({num:num, qty:1});
+      $("qpPartSearch").value = ""; res.innerHTML = "";
+      renderQpSelParts();
+    };
+    div.appendChild(b); res.appendChild(div);
+  }
+  if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"', -1); return; }
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], hits[h][1], null, hits[h][3]);
+}
+function renderQpSelParts(){
+  var el = $("qpSelParts"); el.innerHTML = "";
+  for (var i=0;i<qpParts.length;i++){
+    (function(sp){
+      var div = document.createElement("div");
+      div.className = "selpart";
+      var lbl = document.createElement("span"); lbl.className="spn"; lbl.textContent = sp.num;
+      var minus = document.createElement("button"); minus.className="qbtn"; minus.textContent="−";
+      minus.onclick = function(){ if(sp.qty>1){sp.qty--; renderQpSelParts();} };
+      var qn = document.createElement("span"); qn.className="qnum"; qn.textContent = "x"+sp.qty;
+      var plus = document.createElement("button"); plus.className="qbtn"; plus.textContent="+";
+      plus.onclick = function(){ sp.qty++; renderQpSelParts(); };
+      var rem = document.createElement("button"); rem.className="sprem"; rem.innerHTML="&#10005;";
+      rem.onclick = function(){ qpParts.splice(qpParts.indexOf(sp),1); renderQpSelParts(); };
+      div.appendChild(lbl); div.appendChild(minus); div.appendChild(qn);
+      div.appendChild(plus); div.appendChild(rem);
+      el.appendChild(div);
+    })(qpParts[i]);
+  }
+}
 function renderQpList(){
   var el = $("qpList"); el.innerHTML = "";
   for (var i=0;i<DB.quicks.length;i++){
@@ -1362,7 +1415,9 @@ function renderQpList(){
         qpEditIndex = idx;
         $("qpTitle").textContent = "Edit Quick Pick";
         $("qpLabel").value = qk.l;
-        $("qpParts").value = qk.p || "";
+        qpParts = parsePartsString(qk.p);
+        $("qpPartSearch").value = ""; $("qpPartResults").innerHTML = "";
+        renderQpSelParts();
         $("qpModal").className = "modal open";
       };
       var db = document.createElement("button");
@@ -1380,14 +1435,22 @@ function renderQpList(){
 $("btnAddQp").onclick = function(){
   qpEditIndex = -1;
   $("qpTitle").textContent = "New Quick Pick";
-  $("qpLabel").value = ""; $("qpParts").value = "";
+  $("qpLabel").value = "";
+  qpParts = [];
+  $("qpPartSearch").value = ""; $("qpPartResults").innerHTML = "";
+  renderQpSelParts();
   $("qpModal").className = "modal open";
 };
 $("btnQpCancel").onclick = function(){ $("qpModal").className = "modal"; };
+$("qpPartSearch").addEventListener("input", function(){ searchQpParts(this.value); });
 $("btnQpSave").onclick = function(){
   var l = $("qpLabel").value.trim();
   if (!l){ toast("Give it a label", true); return; }
-  var p = $("qpParts").value.trim();
+  var p = "";
+  for (var i=0;i<qpParts.length;i++){
+    if (i) p += ", ";
+    p += qpParts[i].num + " x" + qpParts[i].qty;
+  }
   if (qpEditIndex > -1) DB.quicks[qpEditIndex] = { l: l.toUpperCase(), p: p };
   else DB.quicks.push({ l: l.toUpperCase(), p: p });
   save(); renderQpList();
