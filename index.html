@@ -279,6 +279,12 @@
     <textarea class="in" id="backupOut" style="display:none; margin-top:8px" readonly></textarea>
   </div>
   <div class="exportcard">
+    <h3>Quick Picks</h3>
+    <p>The one-tap job buttons in the log form, with the parts they pre-fill. Parts format: <b>59687 x1, 59686 x1</b> — always part number then x-quantity.</p>
+    <div id="qpList"></div>
+    <button class="hbtn" id="btnAddQp">+ Add Quick Pick</button>
+  </div>
+  <div class="exportcard">
     <h3>Mechanics</h3>
     <p id="mechList"></p>
     <button class="hbtn" id="btnAddMech">Add Mechanic</button>
@@ -337,6 +343,21 @@
 <!-- hidden camera / library input -->
 <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
 
+<!-- quick pick editor modal -->
+<div class="modal" id="qpModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle" id="qpTitle">Edit Quick Pick</div>
+    <label class="f">BUTTON LABEL (also becomes the action text)</label>
+    <input type="text" class="in" id="qpLabel" placeholder="e.g. REPLACE CHAIN">
+    <label class="f">AUTO-FILLED PARTS (optional)</label>
+    <input type="text" class="in" id="qpParts" placeholder="e.g. 59687 x1, 59686 x1">
+    <div class="mactions">
+      <button class="hbtn" id="btnQpCancel">Cancel</button>
+      <button class="hbtn red" id="btnQpSave">SAVE</button>
+    </div>
+  </div>
+</div>
+
 <!-- shop parts modal -->
 <div class="modal" id="shopModal">
   <div class="mcard">
@@ -383,9 +404,12 @@ var ADULT_KARTS = [];
 var JR_KARTS = [];
 (function(){ var i; for(i=1;i<=40;i++) ADULT_KARTS.push(String(i)); for(i=41;i<=53;i++) JR_KARTS.push(String(i)); })();
 
-var QUICK_ACTIONS = [
-  "BRAKE FLUSH","REPLACE CHAIN","REPLACE DIFF","BRAKE PADS","TIRE CHANGE",
-  "REPLACE BATTERY","REAR END REWORK","CABLE REPLACE","WELD","INSPECTION"
+var DEFAULT_QUICKS = [
+  { l: "REPLACE CHAIN",      p: "59687 x1, 59686 x1" },
+  { l: "REAR END REWORK",    p: "59682 x4, 59694 x4" },
+  { l: "TIRE CHANGE (ADULT)", p: "SAK-6011-5-MED x1" },
+  { l: "TIRE CHANGE (JR)",   p: "59895 x1" },
+  { l: "CABLE REPLACE",      p: "59014 x1" }
 ];
 
 var LS_KEY = "k1kartlog_v1";
@@ -482,6 +506,7 @@ function load(){
   if (!DB.meta.up) DB.meta.up = {};             /* photo ids uploaded to Drive */
   if (!DB.meta.photoUrls) DB.meta.photoUrls = {}; /* photo id -> Drive link */
   if (!DB.shop) DB.shop = [];                     /* non-kart parts use */
+  if (!DB.quicks) DB.quicks = JSON.parse(JSON.stringify(DEFAULT_QUICKS));
   if (!DB.meta.emmettRemoved){
     var _ei = DB.mechanics.indexOf("EMMETT");
     if (_ei > -1) DB.mechanics.splice(_ei, 1);
@@ -524,7 +549,7 @@ function buildSnapshot(){
     }
   }
   return { type:"snapshot", app:"k1kartlog", karts: karts,
-           shop: DB.shop.slice(0), parts: PARTS };
+           shop: DB.shop.slice(0), quicks: DB.quicks, parts: PARTS };
 }
 function syncNow(silent){
   if (!DB.meta.syncUrl){
@@ -627,6 +652,7 @@ function pullFromSheet(){
       }
       DB.meta.photoUrls = resp.photos || {};
       if (resp.shop) DB.shop = resp.shop;
+      if (resp.quicks) DB.quicks = resp.quicks;
       /* photos already stored in the sheet don't need re-upload from this device */
       for (var pid in DB.meta.photoUrls) DB.meta.up[pid] = 1;
       save(); renderHome();
@@ -1091,22 +1117,38 @@ function closeLog(){
   pendingPhotos = [];
 }
 
+function parsePartsString(s){
+  var out = [];
+  if (!s) return out;
+  var items = String(s).split(",");
+  for (var i=0;i<items.length;i++){
+    var it = items[i].trim();
+    if (!it) continue;
+    var m = it.match(/^(.+?)\s*[xX]\s*(\d+)$/);
+    if (m) out.push({num: m[1].trim(), qty: parseInt(m[2],10) || 1});
+    else out.push({num: it, qty: 1});
+  }
+  return out;
+}
 function renderQuickRow(){
   var row = $("quickRow"); row.innerHTML = "";
-  for (var i=0;i<QUICK_ACTIONS.length;i++){
-    (function(a){
+  for (var i=0;i<DB.quicks.length;i++){
+    (function(qk){
       var c = document.createElement("button");
       c.className = "chip";
-      c.textContent = a;
+      c.textContent = qk.l;
       c.onclick = function(){
-        $("fAction").value = a;
+        $("fAction").value = qk.l;
         updateAutoNote();
+        selectedParts = parsePartsString(qk.p);
+        renderSelParts();
         var chips = row.querySelectorAll(".chip");
         for (var j=0;j<chips.length;j++) chips[j].className = "chip";
         c.className = "chip on";
+        if (selectedParts.length) toast("Parts pre-filled — adjust below if needed");
       };
       row.appendChild(c);
-    })(QUICK_ACTIONS[i]);
+    })(DB.quicks[i]);
   }
 }
 function renderMechRow(){
@@ -1292,6 +1334,7 @@ $("btnExportScr").onclick = function(){
   $("mechList").textContent = ml;
   $("syncUrl").value = DB.meta.syncUrl || "";
   updateSyncStatus();
+  renderQpList();
   showScreen("scrExport");
 };
 $("btnLog").onclick = openLog;
@@ -1304,6 +1347,53 @@ $("btnShowImport").onclick = function(){
   a.style.display = a.style.display === "none" ? "block" : "none";
 };
 $("btnImport").onclick = doImport;
+var qpEditIndex = -1;
+function renderQpList(){
+  var el = $("qpList"); el.innerHTML = "";
+  for (var i=0;i<DB.quicks.length;i++){
+    (function(qk, idx){
+      var div = document.createElement("div");
+      div.className = "partitem";
+      div.innerHTML = '<span class="pd"><b style="color:#fff">'+esc(qk.l)+'</b><br>'+
+        (qk.p ? esc(qk.p) : '<span style="color:#667">no auto parts</span>')+'</span>';
+      var eb = document.createElement("button");
+      eb.className = "padd"; eb.style.background = "#2f3546"; eb.textContent = "EDIT";
+      eb.onclick = function(){
+        qpEditIndex = idx;
+        $("qpTitle").textContent = "Edit Quick Pick";
+        $("qpLabel").value = qk.l;
+        $("qpParts").value = qk.p || "";
+        $("qpModal").className = "modal open";
+      };
+      var db = document.createElement("button");
+      db.className = "sprem"; db.innerHTML = "&#10005;";
+      db.onclick = function(){
+        if (confirm('Remove quick pick "' + qk.l + '"?')){
+          DB.quicks.splice(idx, 1); save(); renderQpList();
+        }
+      };
+      div.appendChild(eb); div.appendChild(db);
+      el.appendChild(div);
+    })(DB.quicks[i], i);
+  }
+}
+$("btnAddQp").onclick = function(){
+  qpEditIndex = -1;
+  $("qpTitle").textContent = "New Quick Pick";
+  $("qpLabel").value = ""; $("qpParts").value = "";
+  $("qpModal").className = "modal open";
+};
+$("btnQpCancel").onclick = function(){ $("qpModal").className = "modal"; };
+$("btnQpSave").onclick = function(){
+  var l = $("qpLabel").value.trim();
+  if (!l){ toast("Give it a label", true); return; }
+  var p = $("qpParts").value.trim();
+  if (qpEditIndex > -1) DB.quicks[qpEditIndex] = { l: l.toUpperCase(), p: p };
+  else DB.quicks.push({ l: l.toUpperCase(), p: p });
+  save(); renderQpList();
+  $("qpModal").className = "modal";
+  toast("Quick picks saved");
+};
 $("btnAddMech").onclick = function(){
   var v = prompt("Mechanic name:");
   if (v && v.trim()){
