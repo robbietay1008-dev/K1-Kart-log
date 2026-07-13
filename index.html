@@ -349,6 +349,8 @@
     <div class="mtitle" id="qpTitle">Edit Quick Pick</div>
     <label class="f">BUTTON LABEL (also becomes the action text)</label>
     <input type="text" class="in" id="qpLabel" placeholder="e.g. REPLACE CHAIN">
+    <label class="f">SHOWS ON</label>
+    <div class="chiprow" id="qpScopeRow"></div>
     <label class="f">AUTO-FILLED PARTS (optional) — search and tap ADD</label>
     <input type="search" class="in" id="qpPartSearch" placeholder="Type: chains, 59687 ...">
     <div class="partresults" id="qpPartResults"></div>
@@ -407,12 +409,13 @@ var JR_KARTS = [];
 (function(){ var i; for(i=1;i<=40;i++) ADULT_KARTS.push(String(i)); for(i=41;i<=53;i++) JR_KARTS.push(String(i)); })();
 
 var DEFAULT_QUICKS = [
-  { l: "REPLACE CHAIN",      p: "59687 x1, 59686 x1" },
-  { l: "REAR END REWORK",    p: "59682 x4, 59694 x4" },
-  { l: "TIRE CHANGE (ADULT)", p: "SAK-6011-5-MED x1" },
-  { l: "TIRE CHANGE (JR)",   p: "59895 x1" },
-  { l: "CABLE REPLACE",      p: "59014 x1" }
+  { l: "REPLACE CHAIN",   p: "59687 x1, 59686 x1", s: "all" },
+  { l: "REAR END REWORK", p: "59682 x4, 59694 x4", s: "adult" },
+  { l: "TIRE CHANGE",     p: "SAK-6011-5-MED x1",  s: "adult" },
+  { l: "TIRE CHANGE",     p: "59895 x1",           s: "jr" },
+  { l: "CABLE REPLACE",   p: "59014 x1",           s: "all" }
 ];
+var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
@@ -509,6 +512,14 @@ function load(){
   if (!DB.meta.photoUrls) DB.meta.photoUrls = {}; /* photo id -> Drive link */
   if (!DB.shop) DB.shop = [];                     /* non-kart parts use */
   if (!DB.quicks) DB.quicks = JSON.parse(JSON.stringify(DEFAULT_QUICKS));
+  for (var qi=0; qi<DB.quicks.length; qi++){
+    if (!DB.quicks[qi].s){
+      var ql = DB.quicks[qi].l.toUpperCase();
+      DB.quicks[qi].s = ql.indexOf("(JR)") > -1 ? "jr" :
+                        ql.indexOf("(ADULT)") > -1 ? "adult" : "all";
+      DB.quicks[qi].l = DB.quicks[qi].l.replace(/\s*\((JR|ADULT)\)\s*$/i, "");
+    }
+  }
   if (!DB.meta.emmettRemoved){
     var _ei = DB.mechanics.indexOf("EMMETT");
     if (_ei > -1) DB.mechanics.splice(_ei, 1);
@@ -1134,7 +1145,10 @@ function parsePartsString(s){
 }
 function renderQuickRow(){
   var row = $("quickRow"); row.innerHTML = "";
+  var isJr = (+currentKart) >= 41;
   for (var i=0;i<DB.quicks.length;i++){
+    if (DB.quicks[i].s === "adult" && isJr) continue;
+    if (DB.quicks[i].s === "jr" && !isJr) continue;
     (function(qk){
       var c = document.createElement("button");
       c.className = "chip";
@@ -1351,6 +1365,20 @@ $("btnShowImport").onclick = function(){
 $("btnImport").onclick = doImport;
 var qpEditIndex = -1;
 var qpParts = [];
+var qpScope = "all";
+function renderQpScopeRow(){
+  var row = $("qpScopeRow"); row.innerHTML = "";
+  var opts = ["all","adult","jr"];
+  for (var i=0;i<opts.length;i++){
+    (function(sc){
+      var c = document.createElement("button");
+      c.className = "chip" + (qpScope===sc ? " on" : "");
+      c.textContent = SCOPE_LABEL[sc];
+      c.onclick = function(){ qpScope = sc; renderQpScopeRow(); };
+      row.appendChild(c);
+    })(opts[i]);
+  }
+}
 function searchQpParts(q){
   q = q.trim().toUpperCase();
   var res = $("qpPartResults"); res.innerHTML = "";
@@ -1407,7 +1435,8 @@ function renderQpList(){
     (function(qk, idx){
       var div = document.createElement("div");
       div.className = "partitem";
-      div.innerHTML = '<span class="pd"><b style="color:#fff">'+esc(qk.l)+'</b><br>'+
+      var tag = qk.s !== "all" ? ' <span style="color:#6fa3e8;font-size:11px;font-weight:800">['+SCOPE_LABEL[qk.s]+']</span>' : '';
+      div.innerHTML = '<span class="pd"><b style="color:#fff">'+esc(qk.l)+'</b>'+tag+'<br>'+
         (qk.p ? esc(qk.p) : '<span style="color:#667">no auto parts</span>')+'</span>';
       var eb = document.createElement("button");
       eb.className = "padd"; eb.style.background = "#2f3546"; eb.textContent = "EDIT";
@@ -1415,6 +1444,8 @@ function renderQpList(){
         qpEditIndex = idx;
         $("qpTitle").textContent = "Edit Quick Pick";
         $("qpLabel").value = qk.l;
+        qpScope = qk.s || "all";
+        renderQpScopeRow();
         qpParts = parsePartsString(qk.p);
         $("qpPartSearch").value = ""; $("qpPartResults").innerHTML = "";
         renderQpSelParts();
@@ -1436,6 +1467,8 @@ $("btnAddQp").onclick = function(){
   qpEditIndex = -1;
   $("qpTitle").textContent = "New Quick Pick";
   $("qpLabel").value = "";
+  qpScope = "all";
+  renderQpScopeRow();
   qpParts = [];
   $("qpPartSearch").value = ""; $("qpPartResults").innerHTML = "";
   renderQpSelParts();
@@ -1451,8 +1484,8 @@ $("btnQpSave").onclick = function(){
     if (i) p += ", ";
     p += qpParts[i].num + " x" + qpParts[i].qty;
   }
-  if (qpEditIndex > -1) DB.quicks[qpEditIndex] = { l: l.toUpperCase(), p: p };
-  else DB.quicks.push({ l: l.toUpperCase(), p: p });
+  if (qpEditIndex > -1) DB.quicks[qpEditIndex] = { l: l.toUpperCase(), p: p, s: qpScope };
+  else DB.quicks.push({ l: l.toUpperCase(), p: p, s: qpScope });
   save(); renderQpList();
   $("qpModal").className = "modal";
   toast("Quick picks saved");
