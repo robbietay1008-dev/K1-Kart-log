@@ -5,14 +5,14 @@ browser on the shop iPad (works on old iPads — no App Store needed), tracks
 work history, service dates, kart notes, photos, and parts used for karts
 1–53, and live-syncs to the shop's Google Sheet.
 
-**The app itself is `index.html`** — one self-contained file, no server, no
-install. With GitHub Pages turned on for this repo, it's live at:
+## ▶ Open the app
 
-```
-https://<your-username>.github.io/<repo-name>/
-```
+**https://robbietay1008-dev.github.io/K1-Kart-log/**
 
-Open that on the iPad in Safari → Share → **Add to Home Screen**.
+That's the live app (served from this repo's `index.html` by GitHub Pages —
+it updates automatically about a minute after every push). On the shop iPad:
+open the link in Safari → Share → **Add to Home Screen** → tap the icon like
+any app.
 
 ## What it does
 
