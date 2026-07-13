@@ -308,7 +308,7 @@ function writeLog(ss, data, photoIndex) {
     }
   }
   all.sort(function (a, b) {
-    var d = new Date(a[0]) - new Date(b[0]);
+    var d = new Date(b[0]) - new Date(a[0]);   // newest first
     return d || ((+a[1]) - (+b[1]));
   });
   rows = rows.concat(all);
