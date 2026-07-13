@@ -239,10 +239,11 @@
   </div>
   <div class="exportcard">
     <h3>Google Sheet Live Sync</h3>
-    <p>One-time setup: install the sync script on the shop Google Sheet (instructions come with the app), then paste the Web App URL it gives you here. After that, every log, date, and note change is pushed to the sheet automatically over wifi — it fills the APP LOG, APP ALL DATES and APP PARTS USED tabs.</p>
+    <p>The sheet is the app's home base: every log, date, and note change pushes automatically over wifi (APP LOG / APP ALL DATES / APP PARTS USED tabs), and photos are stored INSIDE the sheet on the APP PHOTOS tab. "Load From Google Sheet" pulls the master copy down — for a new or replacement device.</p>
     <input type="url" class="in" id="syncUrl" placeholder="https://script.google.com/macros/s/.../exec">
     <button class="hbtn" id="btnSaveSync" style="margin-top:8px">Save Link</button>
     <button class="hbtn red" id="btnSyncNow">Sync to Google Sheet Now</button>
+    <button class="hbtn" id="btnPullSheet">Load From Google Sheet (restore)</button>
     <p id="syncStatus" style="margin-top:6px"></p>
   </div>
   <div class="exportcard">
@@ -462,6 +463,8 @@ function load(){
   /* migration for data saved by older versions */
   if (!DB.meta) DB.meta = { syncUrl:"", lastSync:"" };
   if (!DB.meta.syncUrl && DEFAULT_SYNC_URL) DB.meta.syncUrl = DEFAULT_SYNC_URL;
+  if (!DB.meta.up) DB.meta.up = {};             /* photo ids uploaded to Drive */
+  if (!DB.meta.photoUrls) DB.meta.photoUrls = {}; /* photo id -> Drive link */
   var allk = ADULT_KARTS.concat(JR_KARTS);
   for (var m=0;m<allk.length;m++){
     if (!DB.karts[allk[m]]) DB.karts[allk[m]] = { status: blankStatus(), entries: [], knotes:"" };
@@ -473,6 +476,7 @@ function save(){
   try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); }
   catch(e){ toast("SAVE FAILED — storage full?"); }
   scheduleSync();
+  setTimeout(function(){ uploadPendingPhotos(); }, 600);
 }
 
 /* ================= GOOGLE SHEET SYNC ================= */
@@ -493,7 +497,7 @@ function buildSnapshot(){
       karts[k].entries.push({
         date: en.date, action: en.action, parts: en.parts,
         mechanic: en.mechanic, notes: en.notes,
-        photos: (en.photos && en.photos.length) || 0
+        photos: (en.photos || []).slice(0)
       });
     }
   }
@@ -518,8 +522,9 @@ function syncNow(silent){
     var now = new Date();
     DB.meta.lastSync = (now.getMonth()+1)+"/"+now.getDate()+"/"+now.getFullYear()+" "+
       now.getHours()+":"+(now.getMinutes()<10?"0":"")+now.getMinutes();
-    try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); } catch(e){}
+    saveQuiet();
     updateSyncStatus();
+    uploadPendingPhotos();
     if (!silent) toast("Sent to Google Sheet");
   })["catch"](function(){
     if (!silent) toast("Sync failed — no wifi? Data is safe on this device", true);
@@ -530,6 +535,85 @@ function updateSyncStatus(){
   if (!el) return;
   if (!DB.meta.syncUrl){ el.textContent = "Not linked yet."; return; }
   el.textContent = DB.meta.lastSync ? ("Linked. Last sent: " + DB.meta.lastSync) : "Linked. Nothing sent yet.";
+}
+function saveQuiet(){
+  try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); } catch(e){}
+}
+/* ---- photo upload to Drive (via the sheet receiver) ---- */
+var photoUploadBusy = false;
+function uploadPendingPhotos(){
+  if (!DB.meta.syncUrl || typeof fetch !== "function" || photoUploadBusy) return;
+  /* find up to 3 photos not yet uploaded */
+  var jobs = [];
+  var all = ADULT_KARTS.concat(JR_KARTS);
+  for (var i=0;i<all.length && jobs.length<3;i++){
+    var es = DB.karts[all[i]].entries;
+    for (var j=0;j<es.length && jobs.length<3;j++){
+      var ph = es[j].photos || [];
+      for (var p=0;p<ph.length && jobs.length<3;p++){
+        if (!DB.meta.up[ph[p]]) jobs.push({id: ph[p], kart: all[i], date: es[j].date});
+      }
+    }
+  }
+  if (!jobs.length) return;
+  photoUploadBusy = true;
+  var done = 0;
+  jobs.forEach(function(job){
+    photoGet(job.id, function(dataURL){
+      if (!dataURL){
+        DB.meta.up[job.id] = 1; /* nothing local to send (restored device) */
+        if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); uploadPendingPhotos(); }
+        return;
+      }
+      fetch(DB.meta.syncUrl, {
+        method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain"},
+        body: JSON.stringify({app:"k1kartlog", type:"photo", id:job.id,
+                              kart:job.kart, date:job.date, dataURL:dataURL})
+      }).then(function(){
+        DB.meta.up[job.id] = 1;
+        if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); uploadPendingPhotos(); }
+      })["catch"](function(){
+        if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); }
+      });
+    });
+  });
+}
+/* ---- restore this device from the sheet's master copy ---- */
+function pullFromSheet(){
+  if (!DB.meta.syncUrl){ toast("Not linked to the sheet", true); return; }
+  if (!confirm("Load the master copy from the Google Sheet?\n\nThis REPLACES all log data on THIS device with what the sheet has. Photos stored on other devices open as Drive links.")) return;
+  window.__klRestore = function(resp){
+    try {
+      if (!resp || !resp.ok || !resp.karts){ toast("Sheet has no saved data yet — sync from the main device first", true); return; }
+      var all = ADULT_KARTS.concat(JR_KARTS);
+      for (var i=0;i<all.length;i++){
+        var k = all[i], src = resp.karts[k];
+        if (!src) continue;
+        DB.karts[k].status = src.status || blankStatus();
+        DB.karts[k].knotes = src.knotes || "";
+        var es = src.entries || [];
+        var entries = [];
+        for (var j=0;j<es.length;j++){
+          var en = es[j];
+          var photos = en.photos;
+          if (typeof photos === "number" || !photos) photos = [];
+          entries.push({ date:en.date||"", action:en.action||"", parts:en.parts||"",
+                         mechanic:en.mechanic||"", notes:en.notes||"", photos:photos });
+        }
+        DB.karts[k].entries = entries;
+      }
+      DB.meta.photoUrls = resp.photos || {};
+      /* photos already in Drive don't need re-upload from this device */
+      for (var pid in DB.meta.photoUrls) DB.meta.up[pid] = 1;
+      save(); renderHome();
+      toast("Loaded from Google Sheet");
+    } catch(e){ toast("Restore failed: " + e.message, true); }
+  };
+  var s = document.createElement("script");
+  s.src = DB.meta.syncUrl + (DB.meta.syncUrl.indexOf("?")>-1?"&":"?") + "mode=snapshot&callback=__klRestore&t=" + Date.now();
+  s.onerror = function(){ toast("Couldn't reach the sheet — wifi?", true); };
+  document.body.appendChild(s);
+  toast("Loading from sheet...");
 }
 
 /* ================= HELPERS ================= */
@@ -728,7 +812,20 @@ function renderEntryPhotos(en, rowEl){
       img.className = "thumb";
       photoGet(pid, function(dataURL){
         if (dataURL) img.src = dataURL;
-        else img.alt = "?";
+        else {
+          /* photo lives in Drive (logged on another device) — show a link chip */
+          img.style.display = "none";
+          var b = document.createElement("button");
+          b.className = "thumb";
+          b.style.fontSize = "24px";
+          b.innerHTML = "&#128247;";
+          b.onclick = function(){
+            var u = DB.meta.photoUrls[pid];
+            if (u) window.open(u, "_blank");
+            else toast("Photo is on another device / not synced yet", true);
+          };
+          rowEl.appendChild(b);
+        }
       });
       img.onclick = function(){ openViewer(pid, en); };
       rowEl.appendChild(img);
@@ -788,7 +885,12 @@ var viewerPid = null, viewerEntry = null;
 function openViewer(pid, en){
   viewerPid = pid; viewerEntry = en;
   photoGet(pid, function(dataURL){
-    if (!dataURL){ toast("Photo not found", true); return; }
+    if (!dataURL){
+      var u = DB.meta.photoUrls[pid];
+      if (u) window.open(u, "_blank");
+      else toast("Photo not on this device yet", true);
+      return;
+    }
     $("pvImg").src = dataURL;
     $("pviewer").className = "open";
   });
@@ -1143,6 +1245,7 @@ $("btnSaveSync").onclick = function(){
   toast(DB.meta.syncUrl ? "Link saved" : "Link cleared");
 };
 $("btnSyncNow").onclick = function(){ syncNow(false); };
+$("btnPullSheet").onclick = pullFromSheet;
 $("pvClose").onclick = closeViewer;
 $("pvImg").onclick = closeViewer;
 $("pvDelete").onclick = function(){

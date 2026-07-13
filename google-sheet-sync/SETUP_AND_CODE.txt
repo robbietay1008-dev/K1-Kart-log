@@ -1,114 +1,181 @@
-K1 KART LOG — GOOGLE SHEET LIVE SYNC — ONE-TIME SETUP
-======================================================
+K1 KART LOG — GOOGLE SHEET SYNC RECEIVER v2 (photos in the sheet + restore)
+============================================================================
 
-Do this once, on a computer (not the iPad):
+WHAT'S NEW IN v2: the sheet IS the app's server. Nothing goes to Drive.
+ - Photos are embedded INSIDE the spreadsheet on an "APP PHOTOS" tab
+   (kart #, date, and the picture itself — just like the old workbook).
+   APP LOG's PHOTOS column links to the right row.
+ - The sheet keeps a master copy of all log data on a hidden "_APP DATA"
+   tab, and the app's "Load From Google Sheet" button can restore
+   everything onto a new or replacement device.
 
- 1. Go to sheets.google.com and log in with your gmail
-    (robbietay1008@gmail.com). Open the sheet called
-    "karts_log__with_photos_".
- 2. In the top menu click:  Extensions  ->  Apps Script
- 3. A code editor opens. Delete anything already in it, then
-    copy-paste EVERYTHING below the ==CODE== line at the bottom
-    of this file. Click the floppy-disk Save icon.
- 4. Click the blue "Deploy" button (top right) -> New deployment
- 5. Click the gear icon next to "Select type" -> choose "Web app"
- 6. Set it like this:
-       Description:     kart log sync
-       Execute as:      Me
-       Who has access:  Anyone          <-- important
-    Click Deploy.
- 7. It will ask to Authorize. Pick your gmail account. If Google
-    shows a warning screen, click "Advanced" then "Go to ...
-    (unsafe)" — it's your own script, it's fine.
- 8. Copy the "Web app" URL it shows (starts with
-    https://script.google.com/macros/s/... and ends in /exec).
- 9. On the iPad, open the kart log app -> Export -> paste that
-    URL into the "Google Sheet Live Sync" box -> Save Link ->
-    then hit "Sync to Google Sheet Now" to test.
-10. Check the Google Sheet — three new tabs appear:
-       APP ALL DATES    every kart's chain/diff/brake/battery
-                        dates, weld count, and kart notes
-       APP LOG          every work entry, all karts, one list
-       APP PARTS USED   running inventory count of every part
-                        number the mechanics have logged
-    From then on, every log/date/note saved in the app updates
-    these tabs on its own (the iPad needs wifi; if it's offline,
-    nothing is lost — it sends next time someone hits Sync Now
-    or saves while online).
+HOW TO UPDATE (you already deployed v1 — this KEEPS THE SAME URL):
+ 1. Open the "K1 KART LOG - LIVE" sheet -> Extensions -> Apps Script
+ 2. Select ALL the old code, delete it, paste EVERYTHING below the
+    ==CODE== line. Save (disk icon).
+ 3. Click Deploy -> Manage deployments -> pencil (edit) on the existing
+    deployment -> under "Version" choose "New version" -> Deploy.
+    (NOT "New deployment" — that would change the URL.)
+ 4. Done. Same address, new powers. No new permissions needed.
 
 Notes:
- - The script only writes to those three APP tabs. Your original
-   kart tabs (1-53) and everything else are never touched.
- - Keep the web app URL private — anyone with it could write to
-   those three tabs.
- - If you ever redo the deployment, you get a NEW URL — paste the
-   new one into the app.
+ - The spreadsheet file grows as photos are added (the app compresses
+   each to ~100-300 KB). If it ever feels heavy, old APP PHOTOS rows
+   can be deleted — the log text is never affected.
+ - Don't rename or delete the "_APP DATA" tab (it's hidden) — that's
+   the master copy the app restores from.
+ - Keep the /exec URL private — it can read and write the log data.
 
 ==CODE== (copy everything below this line)
 
-/** K1 Kart Log -> Google Sheet receiver. Writes 3 tabs:
- *  APP ALL DATES, APP LOG, APP PARTS USED. Never touches other tabs. */
+/** K1 Kart Log receiver v2 — the sheet is the server.
+ *  Tabs written: APP ALL DATES, APP LOG, APP PARTS USED, APP PHOTOS,
+ *  _APP DATA (hidden). Never touches any other tab. */
 
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
-    if (!data || data.app !== 'k1kartlog' || !data.karts) {
-      return txt('ignored');
-    }
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!data || data.app !== 'k1kartlog') return txt('ignored');
     var lock = LockService.getScriptLock();
-    lock.waitLock(20000);
+    lock.waitLock(30000);
     try {
-      writeAllDates(ss, data);
-      writeLog(ss, data);
-      writePartsUsed(ss, data);
-    } finally {
-      lock.releaseLock();
-    }
-    return txt('ok');
-  } catch (err) {
-    return txt('error: ' + err);
-  }
+      if (data.type === 'photo') { savePhoto(data); return txt('ok photo'); }
+      if (data.type === 'snapshot') {
+        var ss = SpreadsheetApp.getActiveSpreadsheet();
+        saveJson('snapshot', { savedAt: new Date().toISOString(),
+                               karts: data.karts, parts: data.parts || [] });
+        var photoIndex = loadJson('photo_index', {});
+        writeAllDates(ss, data);
+        writeLog(ss, data, photoIndex);
+        writePartsUsed(ss, data);
+        return txt('ok');
+      }
+      return txt('ignored');
+    } finally { lock.releaseLock(); }
+  } catch (err) { return txt('error: ' + err); }
 }
 
-function doGet() { return txt('kart log sync is running'); }
+function doGet(e) {
+  if (e && e.parameter && e.parameter.mode === 'snapshot') {
+    var cb = (e.parameter.callback || 'callback').replace(/[^\w$.]/g, '');
+    var snap = loadJson('snapshot', null);
+    var photoIndex = loadJson('photo_index', {});
+    var payload = JSON.stringify({ ok: !!snap, karts: snap ? snap.karts : null, photos: photoIndex });
+    return ContentService.createTextOutput(cb + '(' + payload + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return txt('kart log sync is running');
+}
 
 function txt(s) { return ContentService.createTextOutput(s); }
 
+/* ---------- hidden-tab JSON storage (no Drive files) ---------- */
+function dataSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName('_APP DATA');
+  if (!sh) { sh = ss.insertSheet('_APP DATA'); sh.hideSheet(); }
+  return sh;
+}
+function findDataRow(sh, name) {
+  var last = sh.getLastRow();
+  if (!last) return 0;
+  var names = sh.getRange(1, 1, last, 1).getValues();
+  for (var i = 0; i < names.length; i++) if (names[i][0] === name) return i + 1;
+  return 0;
+}
+function saveJson(name, obj) {
+  var sh = dataSheet();
+  var s = JSON.stringify(obj);
+  var chunks = [];
+  for (var i = 0; i < s.length; i += 40000) chunks.push(s.substr(i, 40000));
+  var row = findDataRow(sh, name) || (sh.getLastRow() + 1);
+  var wide = Math.max(sh.getLastColumn(), chunks.length + 1, 2);
+  sh.getRange(row, 1, 1, wide).clearContent();
+  sh.getRange(row, 1).setValue(name);
+  if (chunks.length) sh.getRange(row, 2, 1, chunks.length).setNumberFormat('@').setValues([chunks]);
+}
+function loadJson(name, fallback) {
+  var sh = dataSheet();
+  var row = findDataRow(sh, name);
+  if (!row) return fallback;
+  var vals = sh.getRange(row, 2, 1, Math.max(sh.getLastColumn() - 1, 1)).getValues()[0];
+  var s = '';
+  for (var i = 0; i < vals.length; i++) if (vals[i] !== '') s += vals[i];
+  try { return s ? JSON.parse(s) : fallback; } catch (err) { return fallback; }
+}
+
+/* ---------- photos: embedded in APP PHOTOS tab ---------- */
+function photoSheet(ss) {
+  var sh = ss.getSheetByName('APP PHOTOS');
+  if (!sh) {
+    sh = ss.insertSheet('APP PHOTOS');
+    sh.getRange(1, 1, 1, 4).setValues([['KART', 'DATE', 'PHOTO ID', 'PHOTO']]);
+    sh.setColumnWidth(4, 260);
+  }
+  return sh;
+}
+function savePhoto(data) {
+  if (!data.id || !data.dataURL) throw 'photo missing id/dataURL';
+  var index = loadJson('photo_index', {});
+  if (index[data.id]) return; // already stored
+  var base64 = String(data.dataURL).split(',')[1];
+  if (!base64) throw 'bad dataURL';
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = photoSheet(ss);
+  var row = sh.getLastRow() + 1;
+  sh.getRange(row, 1, 1, 3).setValues([[data.kart || '?', data.date || '', data.id]]);
+  var blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', data.id + '.jpg');
+  var img = sh.insertImage(blob, 4, row);
+  var w = img.getWidth(), h = img.getHeight();
+  if (w > 240) { img.setHeight(Math.round(h * 240 / w)); img.setWidth(240); }
+  sh.setRowHeight(row, Math.max(img.getHeight() + 10, 60));
+  index[data.id] = ss.getUrl() + '#gid=' + sh.getSheetId() + '&range=D' + row;
+  saveJson('photo_index', index);
+}
+
+/* ---------- sheet writers ---------- */
 function freshSheet(ss, name, textCols) {
   var sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
   sh.clearContents();
-  if (textCols) {
-    for (var i = 0; i < textCols.length; i++) {
-      sh.getRange(textCols[i] + ':' + textCols[i]).setNumberFormat('@');
-    }
-  }
+  if (textCols) for (var i = 0; i < textCols.length; i++)
+    sh.getRange(textCols[i] + ':' + textCols[i]).setNumberFormat('@');
   return sh;
 }
-
 function kartOrder(karts) {
   return Object.keys(karts).sort(function (a, b) { return (+a) - (+b); });
 }
-
 function writeAllDates(ss, data) {
-  // battery columns as text so "8-24" stays "8-24"
   var sh = freshSheet(ss, 'APP ALL DATES', ['E', 'F', 'G', 'H']);
   var rows = [['KART', 'CHAIN', 'DIFF', 'BRAKE FLUSH',
                'BAT 1', 'BAT 2', 'BAT 3', 'BAT 4', 'WELD COUNT', 'KART NOTES']];
   var ks = kartOrder(data.karts);
   for (var i = 0; i < ks.length; i++) {
-    var k = ks[i];
-    var st = data.karts[k].status || {};
+    var k = ks[i], st = data.karts[k].status || {};
     rows.push([k, st.chain || '', st.diff || '', st.brake || '',
                st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '',
                st.weld || 0, data.karts[k].knotes || '']);
   }
   sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
 }
-
-function writeLog(ss, data) {
-  var sh = freshSheet(ss, 'APP LOG', ['D']); // parts column as text
+function photoCell(photos, index) {
+  if (!photos) return '';
+  if (typeof photos === 'number') return photos ? photos + ' in app' : '';
+  if (!photos.length) return '';
+  var locs = [], missing = 0;
+  for (var i = 0; i < photos.length; i++) {
+    var u = index[photos[i]];
+    if (u) {
+      var m = u.match(/range=D(\d+)/);
+      locs.push(m ? 'APP PHOTOS row ' + m[1] : u);
+    } else missing++;
+  }
+  var cell = locs.join(', ');
+  if (missing) cell += (cell ? ' + ' : '') + missing + ' not synced yet';
+  return cell;
+}
+function writeLog(ss, data, photoIndex) {
+  var sh = freshSheet(ss, 'APP LOG', ['D']);
   var rows = [['DATE', 'KART', 'ACTION COMPLETED', 'PARTS USED',
                'MECHANIC', 'NOTES', 'PHOTOS']];
   var ks = kartOrder(data.karts);
@@ -118,28 +185,21 @@ function writeLog(ss, data) {
     for (var j = 0; j < es.length; j++) {
       var en = es[j];
       all.push([en.date || '', ks[i], en.action || '', en.parts || '',
-                en.mechanic || '', en.notes || '',
-                en.photos ? en.photos + ' in app' : '']);
+                en.mechanic || '', en.notes || '', photoCell(en.photos, photoIndex)]);
     }
   }
   all.sort(function (a, b) {
-    var da = new Date(a[0]), db = new Date(b[0]);
-    var d = da - db;
-    if (d) return d;
-    return (+a[1]) - (+b[1]);
+    var d = new Date(a[0]) - new Date(b[0]);
+    return d || ((+a[1]) - (+b[1]));
   });
   rows = rows.concat(all);
   sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
 }
-
 function writePartsUsed(ss, data) {
-  var sh = freshSheet(ss, 'APP PARTS USED', ['A']); // part numbers as text
+  var sh = freshSheet(ss, 'APP PARTS USED', ['A']);
   var desc = {};
-  if (data.parts) {
-    for (var p = 0; p < data.parts.length; p++) {
-      desc[String(data.parts[p][0]).toUpperCase()] = data.parts[p][1];
-    }
-  }
+  if (data.parts) for (var p = 0; p < data.parts.length; p++)
+    desc[String(data.parts[p][0]).toUpperCase()] = data.parts[p][1];
   var tot = {}, last = {};
   var ks = Object.keys(data.karts);
   for (var i = 0; i < ks.length; i++) {
