@@ -28,9 +28,8 @@ Notes:
    The real code lives at google-sheet-sync/logic.gs in
    https://github.com/robbietay1008-dev/K1-Kart-log */
 
-var LOGIC_URL = 'https://raw.githubusercontent.com/robbietay1008-dev/K1-Kart-log/main/google-sheet-sync/logic.gs';
-
 function _code() {
+  var LOGIC_URL = 'https://raw.githubusercontent.com/robbietay1008-dev/K1-Kart-log/main/google-sheet-sync/logic.gs';
   var cache = CacheService.getScriptCache();
   var c = cache.get('klogic');
   if (!c) {
