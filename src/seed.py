@@ -18,9 +18,13 @@ for line in open("parts_raw.txt", encoding="utf-8"):
     parts.append([num.strip(), desc.strip()])
 print("parts:", len(parts))
 
+SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec"
+
 tpl = open("app_template.html", encoding="utf-8").read()
 sheetjs = open("sheetjs.min.js", encoding="utf-8").read()
 out = tpl.replace("/*__PARTS__*/[]", json.dumps(parts, separators=(",",":")))
+assert '/*__SYNCURL__*/""' in out
+out = out.replace('/*__SYNCURL__*/""', json.dumps(SYNC_URL))
 out = out.replace("/*__SEED__*/{}", json.dumps(seed, separators=(",",":")))
 assert 'mechanics:["ROBERT","WESLEY","EMMETT"]' in out
 out = out.replace('mechanics:["ROBERT","WESLEY","EMMETT"]',

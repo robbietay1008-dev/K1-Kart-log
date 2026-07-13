@@ -350,6 +350,7 @@ var QUICK_ACTIONS = [
 ];
 
 var LS_KEY = "k1kartlog_v1";
+var DEFAULT_SYNC_URL = /*__SYNCURL__*/"";
 var DB = null;
 
 function blankStatus(){
@@ -438,6 +439,7 @@ function load(){
   }
   /* migration for data saved by older versions */
   if (!DB.meta) DB.meta = { syncUrl:"", lastSync:"" };
+  if (!DB.meta.syncUrl && DEFAULT_SYNC_URL) DB.meta.syncUrl = DEFAULT_SYNC_URL;
   var allk = ADULT_KARTS.concat(JR_KARTS);
   for (var m=0;m<allk.length;m++){
     if (!DB.karts[allk[m]]) DB.karts[allk[m]] = { status: blankStatus(), entries: [], knotes:"" };
