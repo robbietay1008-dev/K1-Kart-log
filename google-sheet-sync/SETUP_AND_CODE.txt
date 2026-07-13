@@ -1,6 +1,10 @@
 K1 KART LOG — GOOGLE SHEET SYNC RECEIVER v4 (inventory + ordering)
 ====================================================================
 
+v4.1 CHANGE: APP NEEDED now has TO GREEN (the suggestion, auto) and a
+separate empty ORDER QTY column that is YOURS — type how many you're
+ordering. Checked items with no qty typed get skipped at Place order.
+
 WHAT'S NEW IN v4 — INVENTORY & TWO-PHASE ORDERING:
  - The app now owns day-to-day stock: parts logged subtract, monthly
    recounts get typed into the app's INVENTORY screen.
@@ -431,21 +435,29 @@ function writeNeeded(ss, inv) {
   var sh = ss.getSheetByName('APP NEEDED');
   var kept = {}; // part -> {chk, qty}
   if (sh) {
-    var last = sh.getLastRow();
-    if (last > 1) {
-      var old = sh.getRange(2, 1, last - 1, 8).getValues();
-      for (var i = 0; i < old.length; i++) {
-        var k = String(old[i][0] || '').trim().toUpperCase();
-        if (k) kept[k] = { chk: old[i][6] === true, qty: old[i][7] };
+    var last = sh.getLastRow(), lastCol = sh.getLastColumn();
+    if (last > 1 && lastCol >= 8) {
+      var hdr = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+      var chkCol = -1, qtyCol = -1;
+      for (var h = 0; h < hdr.length; h++) {
+        if (String(hdr[h]).indexOf('ORDER ✓') > -1) chkCol = h;
+        if (String(hdr[h]).indexOf('ORDER QTY') > -1) qtyCol = h;
+      }
+      if (chkCol > -1 && qtyCol > -1) {
+        var old = sh.getRange(2, 1, last - 1, lastCol).getValues();
+        for (var i = 0; i < old.length; i++) {
+          var k = String(old[i][0] || '').trim().toUpperCase();
+          if (k) kept[k] = { chk: old[i][chkCol] === true, qty: old[i][qtyCol] };
+        }
       }
     }
-    sh.clearContents();
+    sh.clear();
   } else {
     sh = ss.insertSheet('APP NEEDED');
   }
   sh.getRange('A:A').setNumberFormat('@');
-  var rows = [['PART #', 'NAME', 'QTY NOW', 'RED ≤', 'GREEN ≥', 'STATUS', 'ORDER ✓', 'ORDER QTY']];
-  var colors = [['#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc']];
+  var rows = [['PART #', 'NAME', 'QTY NOW', 'RED ≤', 'GREEN ≥', 'STATUS', 'TO GREEN', 'ORDER ✓', 'ORDER QTY']];
+  var colors = [['#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc']];
   for (var num in cfg) {
     var q = (inv && inv[num] !== undefined) ? inv[num] : '';
     if (q === '') continue;
@@ -453,27 +465,26 @@ function writeNeeded(ss, inv) {
     var status = q <= c.r ? 'NEEDED' : (q < c.g ? 'WANTED' : '');
     if (!status) continue;
     var keep = kept[num] || { chk: false, qty: '' };
-    var defQty = keep.qty !== '' && keep.qty !== null && keep.qty !== undefined ? keep.qty : Math.max(c.g - q, 0);
-    rows.push([num, c.n, q, c.r, c.g, status, keep.chk, defQty]);
+    var myQty = (keep.qty === '' || keep.qty === null || keep.qty === undefined) ? '' : keep.qty;
+    rows.push([num, c.n, q, c.r, c.g, status, Math.max(c.g - q, 0), keep.chk, myQty]);
     var bg = status === 'NEEDED' ? '#f4c7c3' : '#fce8b2';
-    colors.push(['#ffffff', '#ffffff', bg, '#ffffff', '#ffffff', bg, '#ffffff', '#ffffff']);
+    colors.push(['#ffffff', '#ffffff', bg, '#ffffff', '#ffffff', bg, '#ffffff', '#ffffff', '#fff9c4']);
   }
-  sh.getRange(1, 1, rows.length, 8).setValues(rows).setBackgrounds(colors);
-  sh.getRange(1, 1, 1, 8).setFontWeight('bold');
-  if (rows.length > 1) sh.getRange(2, 7, rows.length - 1, 1).insertCheckboxes();
+  sh.getRange(1, 1, rows.length, 9).setValues(rows).setBackgrounds(colors);
+  sh.getRange(1, 1, 1, 9).setFontWeight('bold');
+  if (rows.length > 1) sh.getRange(2, 8, rows.length - 1, 1).insertCheckboxes();
   sh.setFrozenRows(1);
 }
 
 /* ---- APP ORDER (phase 2): live view of what you've checked ---- */
 function ensureOrderView(ss) {
   var sh = ss.getSheetByName('APP ORDER');
-  if (!sh) {
-    sh = ss.insertSheet('APP ORDER');
-    sh.getRange(1, 1, 1, 4).setValues([['PART #', 'NAME', 'QTY NOW', 'ORDERING']]).setFontWeight('bold');
-    sh.getRange('A2').setFormula(
-      "=IFERROR(FILTER({'APP NEEDED'!A2:C, 'APP NEEDED'!H2:H}, 'APP NEEDED'!G2:G=TRUE), \"nothing checked yet\")");
-    sh.setFrozenRows(1);
-  }
+  if (!sh) sh = ss.insertSheet('APP ORDER');
+  sh.clear();
+  sh.getRange(1, 1, 1, 4).setValues([['PART #', 'NAME', 'QTY NOW', 'ORDERING']]).setFontWeight('bold');
+  sh.getRange('A2').setFormula(
+    "=IFERROR(FILTER({'APP NEEDED'!A2:C, 'APP NEEDED'!I2:I}, 'APP NEEDED'!H2:H=TRUE), \"nothing checked yet\")");
+  sh.setFrozenRows(1);
 }
 
 /* ---- menu: move checked items into APP ORDERS with the date ---- */
@@ -483,7 +494,7 @@ function placeOrder() {
   if (!needed) { SpreadsheetApp.getUi().alert('No APP NEEDED tab yet.'); return; }
   var last = needed.getLastRow();
   if (last < 2) { SpreadsheetApp.getUi().alert('Nothing on APP NEEDED.'); return; }
-  var vals = needed.getRange(2, 1, last - 1, 8).getValues();
+  var vals = needed.getRange(2, 1, last - 1, 9).getValues();
   var orders = ss.getSheetByName('APP ORDERS');
   if (!orders) {
     orders = ss.insertSheet('APP ORDERS');
@@ -494,18 +505,26 @@ function placeOrder() {
   }
   var today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d/yyyy');
   var orderNo = 'ORD-' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyyMMdd-HHmm');
-  var newRows = [], clearRows = [];
+  var newRows = [], clearRows = [], skipped = 0;
   for (var i = 0; i < vals.length; i++) {
-    if (vals[i][6] === true) {
-      var qty = parseInt(vals[i][7], 10) || 0;
-      if (qty > 0) newRows.push([today, String(vals[i][0]), vals[i][1], qty, '', '', orderNo]);
-      clearRows.push(i + 2);
+    if (vals[i][7] === true) {
+      var qty = parseInt(vals[i][8], 10) || 0;
+      if (qty > 0) { newRows.push([today, String(vals[i][0]), vals[i][1], qty, '', '', orderNo]); clearRows.push(i + 2); }
+      else skipped++;
     }
   }
-  if (!newRows.length) { SpreadsheetApp.getUi().alert('Nothing checked (or all checked rows have 0 qty).'); return; }
+  if (!newRows.length) {
+    SpreadsheetApp.getUi().alert(skipped
+      ? skipped + ' checked item(s) have no ORDER QTY — type how many you\'re ordering first.'
+      : 'Nothing checked.');
+    return;
+  }
   orders.getRange(orders.getLastRow() + 1, 1, newRows.length, 7).setValues(newRows);
-  for (var r = 0; r < clearRows.length; r++) needed.getRange(clearRows[r], 7).setValue(false);
-  SpreadsheetApp.getUi().alert('Order ' + orderNo + ' logged: ' + newRows.length + ' items moved to APP ORDERS.\n\nWhen boxes arrive, type what you got in QTY RECEIVED, then run "Book received quantities into stock".');
+  for (var r = 0; r < clearRows.length; r++) needed.getRange(clearRows[r], 8).setValue(false);
+  var msg = 'Order ' + orderNo + ' logged: ' + newRows.length + ' items moved to APP ORDERS.';
+  if (skipped) msg += '\n\n' + skipped + ' checked item(s) SKIPPED — no ORDER QTY typed.';
+  msg += '\n\nWhen boxes arrive, type what you got in QTY RECEIVED, then run "Book received quantities into stock".';
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 /* ---- menu: book received quantities -> receipts the app applies ---- */
