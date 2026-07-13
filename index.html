@@ -409,6 +409,7 @@ var JR_KARTS = [];
 (function(){ var i; for(i=1;i<=40;i++) ADULT_KARTS.push(String(i)); for(i=41;i<=53;i++) JR_KARTS.push(String(i)); })();
 
 var DEFAULT_QUICKS = [
+  { l: "BRAKE FLUSH",     p: "",                   s: "adult" },
   { l: "REPLACE CHAIN",   p: "59687 x1, 59686 x1", s: "all" },
   { l: "REAR END REWORK", p: "59682 x4, 59694 x4", s: "adult" },
   { l: "TIRE CHANGE",     p: "SAK-6011-5-MED x1",  s: "adult" },
@@ -519,6 +520,13 @@ function load(){
                         ql.indexOf("(ADULT)") > -1 ? "adult" : "all";
       DB.quicks[qi].l = DB.quicks[qi].l.replace(/\s*\((JR|ADULT)\)\s*$/i, "");
     }
+  }
+  if (!DB.meta.qpBrakeFlushAdded){
+    var hasBF = false;
+    for (var bi=0; bi<DB.quicks.length; bi++)
+      if (DB.quicks[bi].l.toUpperCase().indexOf("BRAKE FLUSH") > -1) hasBF = true;
+    if (!hasBF) DB.quicks.unshift({ l:"BRAKE FLUSH", p:"", s:"adult" });
+    DB.meta.qpBrakeFlushAdded = true;
   }
   if (!DB.meta.emmettRemoved){
     var _ei = DB.mechanics.indexOf("EMMETT");
@@ -1262,11 +1270,15 @@ function renderSelParts(){
 }
 function detectAutoUpdates(action){
   var a = action.toUpperCase();
-  var ups = [];
-  if (a.indexOf("BRAKE FLUSH") > -1) ups.push(["brake","BRAKE FLUSH date"]);
-  if (a.indexOf("CHAIN") > -1) ups.push(["chain","CHAIN date"]);
-  if (a.indexOf("DIFF") > -1) ups.push(["diff","DIFF date"]);
-  if (a.indexOf("WELD") > -1) ups.push(["weld","weld count +1"]);
+  var ups = [], seen = {};
+  function add(key, label){ if (!seen[key]){ seen[key] = 1; ups.push([key, label]); } }
+  if (a.indexOf("BRAKE FLUSH") > -1) add("brake","BRAKE FLUSH date");
+  if (a.indexOf("CHAIN") > -1) add("chain","CHAIN date");
+  if (a.indexOf("DIFF") > -1) add("diff","DIFF date");
+  if (a.indexOf("REAR END") > -1 || a.indexOf("REAR-END") > -1){
+    add("chain","CHAIN date"); add("diff","DIFF date");
+  }
+  if (a.indexOf("WELD") > -1) add("weld","weld count +1");
   return ups;
 }
 function updateAutoNote(){
