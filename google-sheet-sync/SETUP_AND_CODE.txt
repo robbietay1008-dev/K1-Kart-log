@@ -1,53 +1,56 @@
-K1 KART LOG — GOOGLE SHEET SYNC RECEIVER v2 (photos in the sheet + restore)
-============================================================================
+K1 KART LOG — GOOGLE SHEET SYNC RECEIVER v3 (sheet = full storage)
+====================================================================
 
-WHAT'S NEW IN v2: the sheet IS the app's server. Nothing goes to Drive.
- - Photos are embedded INSIDE the spreadsheet on an "APP PHOTOS" tab
-   (kart #, date, and the picture itself — just like the old workbook).
-   APP LOG's PHOTOS column links to the right row.
- - The sheet keeps a master copy of all log data on a hidden "_APP DATA"
-   tab, and the app's "Load From Google Sheet" button can restore
-   everything onto a new or replacement device.
+WHAT'S NEW IN v3:
+ - Kart tabs 1–53 are now REWRITTEN BY THE APP on every sync — classic
+   layout (status row + history), always current. Old embedded photos
+   stay where they are.
+ - APP ALL DATES gets color coding like your old ALL DATES tab
+   (green fresh / yellow getting old / red overdue).
+ - Your "parts used" inventory tab is auto-fed: every kart job with
+   parts AND every Shop Parts entry from the app appends a row in your
+   format (Date, Used For, Part Used). Hand-typed rows still fine.
+ - Shop (non-kart) parts entries sync + restore too.
+ - ONE-TIME CLEANUP included: run cleanupSheet() once (instructions
+   below) to delete EXAMPLE + old ALL DATES and reorder tabs:
+   APP tabs -> inventory tabs -> kart tabs -> template.
 
-HOW TO UPDATE (you already deployed v1 — this KEEPS THE SAME URL):
- 1. Open the "K1 KART LOG - LIVE" sheet -> Extensions -> Apps Script
- 2. Select ALL the old code, delete it, paste EVERYTHING below the
-    ==CODE== line. Save (disk icon).
- 3. Click Deploy -> Manage deployments -> pencil (edit) on the existing
-    deployment -> under "Version" choose "New version" -> Deploy.
-    (NOT "New deployment" — that would change the URL.)
- 4. Done. Same address, new powers. No new permissions needed.
-
-Notes:
- - The spreadsheet file grows as photos are added (the app compresses
-   each to ~100-300 KB). If it ever feels heavy, old APP PHOTOS rows
-   can be deleted — the log text is never affected.
- - Don't rename or delete the "_APP DATA" tab (it's hidden) — that's
-   the master copy the app restores from.
- - Keep the /exec URL private — it can read and write the log data.
+HOW TO UPDATE (KEEPS THE SAME URL):
+ 1. Open the sheet -> Extensions -> Apps Script
+ 2. Select ALL old code, delete, paste EVERYTHING below ==CODE==. Save.
+ 3. Deploy -> Manage deployments -> pencil -> Version: New version -> Deploy
+ 4. ONE-TIME CLEANUP: in the editor toolbar there's a function dropdown
+    (says "doPost") — pick "cleanupSheet", press Run, approve if asked.
+    Watch the tab bar reorganize itself. Done — never needs running again.
 
 ==CODE== (copy everything below this line)
 
-/** K1 Kart Log receiver v2 — the sheet is the server.
- *  Tabs written: APP ALL DATES, APP LOG, APP PARTS USED, APP PHOTOS,
- *  _APP DATA (hidden). Never touches any other tab. */
+/** K1 Kart Log receiver v3 — the sheet is the app's full storage.
+ *  Writes: APP ALL DATES, APP LOG, APP PARTS USED, APP PHOTOS,
+ *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
+ *  Never touches inventory tabs' content or the template. */
+
+var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     if (!data || data.app !== 'k1kartlog') return txt('ignored');
     var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
+    lock.waitLock(40000);
     try {
       if (data.type === 'photo') { savePhoto(data); return txt('ok photo'); }
       if (data.type === 'snapshot') {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
         saveJson('snapshot', { savedAt: new Date().toISOString(),
-                               karts: data.karts, parts: data.parts || [] });
+                               karts: data.karts, shop: data.shop || [],
+                               parts: data.parts || [] });
         var photoIndex = loadJson('photo_index', {});
         writeAllDates(ss, data);
         writeLog(ss, data, photoIndex);
         writePartsUsed(ss, data);
+        writeKartTabs(ss, data);
+        feedPartsUsedTab(ss, data);
         return txt('ok');
       }
       return txt('ignored');
@@ -60,7 +63,8 @@ function doGet(e) {
     var cb = (e.parameter.callback || 'callback').replace(/[^\w$.]/g, '');
     var snap = loadJson('snapshot', null);
     var photoIndex = loadJson('photo_index', {});
-    var payload = JSON.stringify({ ok: !!snap, karts: snap ? snap.karts : null, photos: photoIndex });
+    var payload = JSON.stringify({ ok: !!snap, karts: snap ? snap.karts : null,
+                                   shop: snap ? (snap.shop || []) : [], photos: photoIndex });
     return ContentService.createTextOutput(cb + '(' + payload + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
@@ -69,7 +73,29 @@ function doGet(e) {
 
 function txt(s) { return ContentService.createTextOutput(s); }
 
-/* ---------- hidden-tab JSON storage (no Drive files) ---------- */
+/* ================= ONE-TIME CLEANUP (run manually once) ================= */
+function cleanupSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  // delete obsolete tabs
+  ['EXAMPLE', 'ALL DATES'].forEach(function (n) {
+    var sh = ss.getSheetByName(n);
+    if (sh) ss.deleteSheet(sh);
+  });
+  // desired visible order
+  var order = ['APP ALL DATES', 'APP LOG', 'APP PARTS USED', 'APP PHOTOS',
+               'inventory', 'full', 'parts used', 'Restocks', 'needed', 'ordering']
+              .concat(KART_TABS).concat(['template', '_invState']);
+  var pos = 1;
+  for (var i = 0; i < order.length; i++) {
+    var sh = ss.getSheetByName(order[i]);
+    if (!sh) continue;
+    ss.setActiveSheet(sh, true);
+    ss.moveActiveSheet(pos++);
+  }
+  ss.setActiveSheet(ss.getSheetByName('APP ALL DATES') || ss.getSheets()[0], true);
+}
+
+/* ================= hidden-tab JSON storage ================= */
 function dataSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = ss.getSheetByName('_APP DATA');
@@ -104,7 +130,7 @@ function loadJson(name, fallback) {
   try { return s ? JSON.parse(s) : fallback; } catch (err) { return fallback; }
 }
 
-/* ---------- photos: embedded in APP PHOTOS tab ---------- */
+/* ================= photos: embedded in APP PHOTOS tab ================= */
 function photoSheet(ss) {
   var sh = ss.getSheetByName('APP PHOTOS');
   if (!sh) {
@@ -117,7 +143,7 @@ function photoSheet(ss) {
 function savePhoto(data) {
   if (!data.id || !data.dataURL) throw 'photo missing id/dataURL';
   var index = loadJson('photo_index', {});
-  if (index[data.id]) return; // already stored
+  if (index[data.id]) return;
   var base64 = String(data.dataURL).split(',')[1];
   if (!base64) throw 'bad dataURL';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -133,7 +159,37 @@ function savePhoto(data) {
   saveJson('photo_index', index);
 }
 
-/* ---------- sheet writers ---------- */
+/* ================= date helpers for coloring ================= */
+function parseAnyDate(s) {
+  if (!s) return null;
+  var m = String(s).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return new Date(+m[3], +m[1] - 1, +m[2]);
+  return null;
+}
+function parseBat(s) { // "8-24" or "8/24" -> Date(2024, 7)
+  if (!s) return null;
+  var m = String(s).match(/^(\d{1,2})[\/-](\d{2})$/);
+  if (m) return new Date(2000 + (+m[2]), +m[1] - 1, 1);
+  return null;
+}
+function svcColor(s) {
+  var d = parseAnyDate(s);
+  if (!d) return '#ffffff';
+  var days = (Date.now() - d.getTime()) / 86400000;
+  if (days > 90) return '#f4c7c3';   // red — overdue
+  if (days > 75) return '#fce8b2';   // yellow — coming up
+  return '#d9ead3';                  // green — fresh
+}
+function batColor(s) {
+  var d = parseBat(s);
+  if (!d) return '#ffffff';
+  var months = (Date.now() - d.getTime()) / (86400000 * 30.4);
+  if (months > 24) return '#f4c7c3';
+  if (months > 18) return '#fce8b2';
+  return '#d9ead3';
+}
+
+/* ================= sheet writers ================= */
 function freshSheet(ss, name, textCols) {
   var sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
@@ -149,14 +205,86 @@ function writeAllDates(ss, data) {
   var sh = freshSheet(ss, 'APP ALL DATES', ['E', 'F', 'G', 'H']);
   var rows = [['KART', 'CHAIN', 'DIFF', 'BRAKE FLUSH',
                'BAT 1', 'BAT 2', 'BAT 3', 'BAT 4', 'WELD COUNT', 'KART NOTES']];
+  var colors = [['#cccccc', '#cccccc', '#cccccc', '#cccccc', '#cccccc',
+                 '#cccccc', '#cccccc', '#cccccc', '#cccccc', '#cccccc']];
   var ks = kartOrder(data.karts);
   for (var i = 0; i < ks.length; i++) {
     var k = ks[i], st = data.karts[k].status || {};
     rows.push([k, st.chain || '', st.diff || '', st.brake || '',
                st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '',
                st.weld || 0, data.karts[k].knotes || '']);
+    colors.push(['#ffffff', svcColor(st.chain), svcColor(st.diff), svcColor(st.brake),
+                 batColor(st.bat1), batColor(st.bat2), batColor(st.bat3), batColor(st.bat4),
+                 '#ffffff', '#ffffff']);
   }
-  sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  var rng = sh.getRange(1, 1, rows.length, rows[0].length);
+  rng.setValues(rows);
+  rng.setBackgrounds(colors);
+  sh.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
+  sh.setFrozenRows(1);
+}
+var KART_HDR = ['DATE', 'ACTION COMPLETED', 'parts used', 'MECHANIC', 'NOTES',
+                'CHAIN DATE', 'DIFF DATE', 'BRAKE FLUSH', 'BAT 1 DATE', 'BAT 2 DATE',
+                'BAT 3 DATE', 'BAT 4 DATE', 'WELD COUNT'];
+function writeKartTabs(ss, data) {
+  var ks = kartOrder(data.karts);
+  for (var i = 0; i < ks.length; i++) {
+    var k = ks[i];
+    var sh = ss.getSheetByName(k);
+    if (!sh) sh = ss.insertSheet(k);
+    var kd = data.karts[k], st = kd.status || {};
+    var rows = [KART_HDR.slice()];
+    rows.push(['', '', '', '', kd.knotes || '', st.chain || '', st.diff || '', st.brake || '',
+               st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '', st.weld || 0]);
+    var es = (kd.entries || []).slice().sort(function (a, b) {
+      return (new Date(a.date) - new Date(b.date)) || 0;
+    });
+    for (var j = 0; j < es.length; j++) {
+      var en = es[j];
+      rows.push([en.date || '', en.action || '', en.parts || '', en.mechanic || '',
+                 en.notes || '', '', '', '', '', '', '', '', '']);
+    }
+    sh.clearContents();
+    sh.getRange('C:C').setNumberFormat('@');
+    sh.getRange('I:L').setNumberFormat('@');
+    sh.getRange(1, 1, rows.length, KART_HDR.length).setValues(rows);
+    sh.getRange(1, 1, 1, KART_HDR.length).setFontWeight('bold');
+  }
+}
+function entryKey(kind, who, en) {
+  return kind + '|' + who + '|' + (en.date || '') + '|' + (en.action || en.usedFor || '') + '|' + (en.parts || '');
+}
+function feedPartsUsedTab(ss, data) {
+  var sh = ss.getSheetByName('parts used');
+  if (!sh) return; // user removed it; skip silently
+  var seen = loadJson('pu_index', {});
+  var newRows = [];
+  var ks = kartOrder(data.karts);
+  for (var i = 0; i < ks.length; i++) {
+    var es = data.karts[ks[i]].entries || [];
+    for (var j = 0; j < es.length; j++) {
+      var en = es[j];
+      if (!en.parts) continue;
+      var key = entryKey('K', ks[i], en);
+      if (seen[key]) continue;
+      seen[key] = 1;
+      newRows.push([en.date || '', 'KART ' + ks[i] + ' — ' + (en.action || ''), en.parts]);
+    }
+  }
+  var shop = data.shop || [];
+  for (var s = 0; s < shop.length; s++) {
+    var se = shop[s];
+    if (!se.parts) continue;
+    var key2 = entryKey('S', 'shop', se);
+    if (seen[key2]) continue;
+    seen[key2] = 1;
+    newRows.push([se.date || '', se.usedFor || 'SHOP', se.parts]);
+  }
+  if (newRows.length) {
+    var start = sh.getLastRow() + 1;
+    sh.getRange(start, 1, newRows.length, 3).setValues(newRows);
+  }
+  saveJson('pu_index', seen);
 }
 function photoCell(photos, index) {
   if (!photos) return '';
@@ -194,6 +322,8 @@ function writeLog(ss, data, photoIndex) {
   });
   rows = rows.concat(all);
   sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  sh.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
+  sh.setFrozenRows(1);
 }
 function writePartsUsed(ss, data) {
   var sh = freshSheet(ss, 'APP PARTS USED', ['A']);
@@ -201,9 +331,12 @@ function writePartsUsed(ss, data) {
   if (data.parts) for (var p = 0; p < data.parts.length; p++)
     desc[String(data.parts[p][0]).toUpperCase()] = data.parts[p][1];
   var tot = {}, last = {};
+  var sources = [];
   var ks = Object.keys(data.karts);
-  for (var i = 0; i < ks.length; i++) {
-    var es = data.karts[ks[i]].entries || [];
+  for (var i = 0; i < ks.length; i++) sources.push(data.karts[ks[i]].entries || []);
+  sources.push(data.shop || []);
+  for (var s = 0; s < sources.length; s++) {
+    var es = sources[s];
     for (var j = 0; j < es.length; j++) {
       var en = es[j];
       if (!en.parts) continue;
@@ -228,4 +361,6 @@ function writePartsUsed(ss, data) {
                last[nm] ? Utilities.formatDate(last[nm], ss.getSpreadsheetTimeZone(), 'M/d/yyyy') : '']);
   }
   sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
+  sh.getRange(1, 1, 1, 4).setFontWeight('bold');
+  sh.setFrozenRows(1);
 }

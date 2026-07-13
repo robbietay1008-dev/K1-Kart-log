@@ -198,10 +198,30 @@
     <h1><span class="red">K1</span> KART LOG</h1>
     <button class="hbtn" id="btnExportScr">Export</button>
   </div>
+  <div style="padding:12px 14px 0">
+    <button class="hbtn" id="btnShop" style="width:100%; min-height:54px; border:1px dashed #4a5674">&#128736;&#65039; SHOP PARTS USE (not for a kart)</button>
+  </div>
   <div class="sectionlabel">ADULT KARTS</div>
   <div class="grid" id="gridAdult"></div>
   <div class="sectionlabel">JUNIOR KARTS</div>
   <div class="grid" id="gridJr"></div>
+</div>
+
+<!-- ============ SHOP PARTS ============ -->
+<div class="screen" id="scrShop">
+  <div class="hdr">
+    <div class="backrow">
+      <button class="hbtn" id="btnBack3">&#8592; Karts</button>
+      <h1>SHOP PARTS</h1>
+    </div>
+    <button class="hbtn red" id="btnShopLogTop">+ Log</button>
+  </div>
+  <div class="kd">
+    <p style="color:#9aa3b5; font-size:14px; margin-bottom:10px">Parts used on anything that isn't a numbered kart — shop supplies, chargers, track stuff. Feeds the "parts used" tab on the sheet.</p>
+    <button class="bigbtn" id="btnShopLog">+ LOG SHOP PARTS</button>
+    <div class="sectionlabel" style="padding-left:2px">SHOP USE HISTORY</div>
+    <div id="shopList" style="margin-top:10px"></div>
+  </div>
 </div>
 
 <!-- ============ KART DETAIL ============ -->
@@ -320,6 +340,28 @@
 
 <!-- hidden camera / library input -->
 <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
+
+<!-- shop parts modal -->
+<div class="modal" id="shopModal">
+  <div class="mcard">
+    <div class="mtitle">Log Shop Parts Use</div>
+    <label class="f">DATE</label>
+    <input type="date" class="in" id="sfDate">
+    <label class="f">USED FOR</label>
+    <div class="chiprow" id="shopQuickRow"></div>
+    <input type="text" class="in" id="sfUsedFor" placeholder="e.g. BRAKE CLEAN" style="margin-top:8px">
+    <label class="f">PARTS USED — search by number or name</label>
+    <input type="search" class="in" id="sfPartSearch" placeholder="Type: cleaner, fuse, 59815 ...">
+    <div class="partresults" id="sPartResults"></div>
+    <div class="selparts" id="sSelParts"></div>
+    <label class="f">MECHANIC</label>
+    <div class="chiprow" id="sMechRow"></div>
+    <div class="mactions">
+      <button class="hbtn" id="btnCancelShop">Cancel</button>
+      <button class="hbtn red" id="btnSaveShop">SAVE</button>
+    </div>
+  </div>
+</div>
 
 <!-- kart notes modal -->
 <div class="modal" id="knotesModal">
@@ -465,6 +507,7 @@ function load(){
   if (!DB.meta.syncUrl && DEFAULT_SYNC_URL) DB.meta.syncUrl = DEFAULT_SYNC_URL;
   if (!DB.meta.up) DB.meta.up = {};             /* photo ids uploaded to Drive */
   if (!DB.meta.photoUrls) DB.meta.photoUrls = {}; /* photo id -> Drive link */
+  if (!DB.shop) DB.shop = [];                     /* non-kart parts use */
   var allk = ADULT_KARTS.concat(JR_KARTS);
   for (var m=0;m<allk.length;m++){
     if (!DB.karts[allk[m]]) DB.karts[allk[m]] = { status: blankStatus(), entries: [], knotes:"" };
@@ -501,7 +544,8 @@ function buildSnapshot(){
       });
     }
   }
-  return { type:"snapshot", app:"k1kartlog", karts: karts, parts: PARTS };
+  return { type:"snapshot", app:"k1kartlog", karts: karts,
+           shop: DB.shop.slice(0), parts: PARTS };
 }
 function syncNow(silent){
   if (!DB.meta.syncUrl){
@@ -603,7 +647,8 @@ function pullFromSheet(){
         DB.karts[k].entries = entries;
       }
       DB.meta.photoUrls = resp.photos || {};
-      /* photos already in Drive don't need re-upload from this device */
+      if (resp.shop) DB.shop = resp.shop;
+      /* photos already stored in the sheet don't need re-upload from this device */
       for (var pid in DB.meta.photoUrls) DB.meta.up[pid] = 1;
       save(); renderHome();
       toast("Loaded from Google Sheet");
@@ -901,6 +946,145 @@ function closeViewer(){
   viewerPid = null; viewerEntry = null;
 }
 
+/* ================= SHOP PARTS (non-kart) ================= */
+var SHOP_QUICK = ["BRAKE CLEAN","SHOP SUPPLIES","CHARGERS","TRACK","BARRIERS","GENERAL"];
+var shopParts = [];
+var shopMech = "";
+
+function renderShop(){
+  var el = $("shopList"); el.innerHTML = "";
+  if (!DB.shop.length){
+    el.innerHTML = '<div style="color:#667;padding:16px;text-align:center">Nothing logged yet</div>';
+    return;
+  }
+  var sorted = DB.shop.slice().sort(function(a,b){
+    var da = parseDate(a.date), db_ = parseDate(b.date);
+    return (db_?db_.getTime():0) - (da?da.getTime():0);
+  });
+  for (var i=0;i<sorted.length;i++){
+    (function(en){
+      var div = document.createElement("div");
+      div.className = "entry";
+      div.innerHTML = '<button class="delx">&#10005;</button>' +
+        '<div class="edate">'+en.date+'</div>' +
+        '<div class="eaction">'+esc(en.usedFor)+'</div>' +
+        (en.parts ? '<div class="eparts">&#128295; '+esc(en.parts)+'</div>' : '') +
+        (en.mechanic ? '<div class="emech">by '+esc(en.mechanic)+'</div>' : '');
+      div.querySelector(".delx").onclick = function(){
+        if (confirm("Delete this shop-use entry?\n\n" + en.date + " — " + en.usedFor)){
+          var idx = DB.shop.indexOf(en);
+          if (idx > -1) DB.shop.splice(idx,1);
+          save(); renderShop();
+        }
+      };
+      el.appendChild(div);
+    })(sorted[i]);
+  }
+}
+function openShopLog(){
+  shopParts = []; shopMech = "";
+  $("sfDate").value = todayISO();
+  $("sfUsedFor").value = "";
+  $("sfPartSearch").value = "";
+  $("sPartResults").innerHTML = "";
+  renderShopQuick(); renderShopMechRow(); renderShopSelParts();
+  $("shopModal").className = "modal open";
+}
+function renderShopQuick(){
+  var row = $("shopQuickRow"); row.innerHTML = "";
+  for (var i=0;i<SHOP_QUICK.length;i++){
+    (function(a){
+      var c = document.createElement("button");
+      c.className = "chip"; c.textContent = a;
+      c.onclick = function(){
+        $("sfUsedFor").value = a;
+        var chips = row.querySelectorAll(".chip");
+        for (var j=0;j<chips.length;j++) chips[j].className = "chip";
+        c.className = "chip on";
+      };
+      row.appendChild(c);
+    })(SHOP_QUICK[i]);
+  }
+}
+function renderShopMechRow(){
+  var row = $("sMechRow"); row.innerHTML = "";
+  for (var i=0;i<DB.mechanics.length;i++){
+    (function(m){
+      var c = document.createElement("button");
+      c.className = "chip" + (shopMech===m ? " on" : "");
+      c.textContent = m;
+      c.onclick = function(){ shopMech = m; renderShopMechRow(); };
+      row.appendChild(c);
+    })(DB.mechanics[i]);
+  }
+}
+function searchShopParts(q){
+  q = q.trim().toUpperCase();
+  var res = $("sPartResults"); res.innerHTML = "";
+  if (q.length < 2) return;
+  var hits = [];
+  for (var i=0;i<PARTS.length && hits.length<12;i++){
+    var p = PARTS[i];
+    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1) hits.push(p);
+  }
+  function addRow(num, desc, label){
+    var div = document.createElement("div");
+    div.className = "partitem";
+    div.innerHTML = '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+'</span>';
+    var b = document.createElement("button");
+    b.className = "padd"; b.textContent = label || "ADD";
+    b.onclick = function(){
+      for (var s=0;s<shopParts.length;s++){
+        if (shopParts[s].num === num){ shopParts[s].qty++; renderShopSelParts(); return; }
+      }
+      shopParts.push({num:num, qty:1});
+      $("sfPartSearch").value = ""; res.innerHTML = "";
+      renderShopSelParts();
+    };
+    div.appendChild(b); res.appendChild(div);
+  }
+  if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"'); return; }
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], hits[h][1]);
+}
+function renderShopSelParts(){
+  var el = $("sSelParts"); el.innerHTML = "";
+  for (var i=0;i<shopParts.length;i++){
+    (function(sp){
+      var div = document.createElement("div");
+      div.className = "selpart";
+      var lbl = document.createElement("span"); lbl.className="spn"; lbl.textContent = sp.num;
+      var minus = document.createElement("button"); minus.className="qbtn"; minus.textContent="−";
+      minus.onclick = function(){ if(sp.qty>1){sp.qty--; renderShopSelParts();} };
+      var qn = document.createElement("span"); qn.className="qnum"; qn.textContent = "x"+sp.qty;
+      var plus = document.createElement("button"); plus.className="qbtn"; plus.textContent="+";
+      plus.onclick = function(){ sp.qty++; renderShopSelParts(); };
+      var rem = document.createElement("button"); rem.className="sprem"; rem.innerHTML="&#10005;";
+      rem.onclick = function(){ shopParts.splice(shopParts.indexOf(sp),1); renderShopSelParts(); };
+      div.appendChild(lbl); div.appendChild(minus); div.appendChild(qn);
+      div.appendChild(plus); div.appendChild(rem);
+      el.appendChild(div);
+    })(shopParts[i]);
+  }
+}
+function saveShopLog(){
+  var dateISO = $("sfDate").value;
+  var usedFor = $("sfUsedFor").value.trim();
+  if (!dateISO){ toast("Pick a date", true); return; }
+  if (!usedFor){ toast("What was it used for?", true); return; }
+  if (!shopParts.length){ toast("Add at least one part", true); return; }
+  var partsStr = "";
+  for (var i=0;i<shopParts.length;i++){
+    if (i) partsStr += ", ";
+    partsStr += shopParts[i].num + " x" + shopParts[i].qty;
+  }
+  DB.shop.push({ date: isoToUS(dateISO), usedFor: usedFor,
+                 parts: partsStr, mechanic: shopMech });
+  save();
+  $("shopModal").className = "modal";
+  renderShop();
+  toast("Shop use saved");
+}
+
 /* ================= LOG FORM ================= */
 var selectedParts = []; /* [{num, desc, qty}] */
 var selectedMech = "";
@@ -1094,8 +1278,11 @@ function partsUsedRows(){
   for (var p=0;p<PARTS.length;p++) desc[PARTS[p][0].toUpperCase()] = PARTS[p][1];
   var tot = {}, last = {};
   var all = ADULT_KARTS.concat(JR_KARTS);
-  for (var i=0;i<all.length;i++){
-    var es = DB.karts[all[i]].entries;
+  var sources = [];
+  for (var i=0;i<all.length;i++) sources.push(DB.karts[all[i]].entries);
+  sources.push(DB.shop);
+  for (var s2=0;s2<sources.length;s2++){
+    var es = sources[s2];
     for (var j=0;j<es.length;j++){
       var en = es[j];
       if (!en.parts) continue;
@@ -1135,6 +1322,17 @@ function buildWorkbook(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), "ALL DATES");
   /* parts used (inventory) */
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(partsUsedRows()), "PARTS USED");
+  /* shop (non-kart) parts use */
+  var shopRows = [["DATE","USED FOR","PARTS USED","MECHANIC"]];
+  var shopSorted = DB.shop.slice().sort(function(a,b){
+    var da = parseDate(a.date), db_ = parseDate(b.date);
+    return (da?da.getTime():0) - (db_?db_.getTime():0);
+  });
+  for (var sh=0;sh<shopSorted.length;sh++){
+    var se = shopSorted[sh];
+    shopRows.push([se.date, se.usedFor, se.parts, se.mechanic]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shopRows), "SHOP PARTS");
   /* per-kart sheets */
   for (var i=0;i<all.length;i++){
     var k = all[i];
@@ -1196,6 +1394,13 @@ function doImport(){
 /* ================= WIRE UP ================= */
 $("btnBack").onclick = function(){ showScreen("scrHome"); renderHome(); };
 $("btnBack2").onclick = function(){ showScreen("scrHome"); renderHome(); };
+$("btnBack3").onclick = function(){ showScreen("scrHome"); renderHome(); };
+$("btnShop").onclick = function(){ renderShop(); showScreen("scrShop"); window.scrollTo(0,0); };
+$("btnShopLog").onclick = openShopLog;
+$("btnShopLogTop").onclick = openShopLog;
+$("btnCancelShop").onclick = function(){ $("shopModal").className = "modal"; };
+$("btnSaveShop").onclick = saveShopLog;
+$("sfPartSearch").addEventListener("input", function(){ searchShopParts(this.value); });
 $("btnExportScr").onclick = function(){
   var ml = ""; for (var i=0;i<DB.mechanics.length;i++){ if(i) ml += ", "; ml += DB.mechanics[i]; }
   $("mechList").textContent = ml;
