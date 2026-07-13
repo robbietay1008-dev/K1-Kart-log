@@ -404,9 +404,13 @@ var PARTS = /*__PARTS__*/[];  /* [num, shop name, factory alias, thumb idx] */
 var THUMBS = /*__THUMBS__*/[];
 var SEED = /*__SEED__*/{};
 
+var REMOVED_KARTS = { "1":1, "35":1, "36":1 };  /* retired/placeholder karts */
 var ADULT_KARTS = [];
 var JR_KARTS = [];
-(function(){ var i; for(i=1;i<=40;i++) ADULT_KARTS.push(String(i)); for(i=41;i<=53;i++) JR_KARTS.push(String(i)); })();
+(function(){ var i;
+  for(i=1;i<=40;i++) if(!REMOVED_KARTS[String(i)]) ADULT_KARTS.push(String(i));
+  for(i=41;i<=53;i++) if(!REMOVED_KARTS[String(i)]) JR_KARTS.push(String(i));
+})();
 
 var DEFAULT_QUICKS = [
   { l: "BRAKE FLUSH",     p: "",                   s: "adult" },
