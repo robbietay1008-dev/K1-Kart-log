@@ -1,27 +1,30 @@
-K1 KART LOG — GOOGLE SHEET SYNC RECEIVER v3 (sheet = full storage)
+K1 KART LOG — GOOGLE SHEET SYNC RECEIVER v4 (inventory + ordering)
 ====================================================================
 
-WHAT'S NEW IN v3:
- - Kart tabs 1–53 are now REWRITTEN BY THE APP on every sync — classic
-   layout (status row + history), always current. Old embedded photos
-   stay where they are.
- - APP ALL DATES gets color coding like your old ALL DATES tab
-   (green fresh / yellow getting old / red overdue).
- - Your "parts used" inventory tab is auto-fed: every kart job with
-   parts AND every Shop Parts entry from the app appends a row in your
-   format (Date, Used For, Part Used). Hand-typed rows still fine.
- - Shop (non-kart) parts entries sync + restore too.
- - ONE-TIME CLEANUP included: run cleanupSheet() once (instructions
-   below) to delete EXAMPLE + old ALL DATES and reorder tabs:
-   APP tabs -> inventory tabs -> kart tabs -> template.
+WHAT'S NEW IN v4 — INVENTORY & TWO-PHASE ORDERING:
+ - The app now owns day-to-day stock: parts logged subtract, monthly
+   recounts get typed into the app's INVENTORY screen.
+ - Every sync writes live quantities into your inventory tab's
+   QUANTITY column (names, thresholds, everything else on that tab
+   stays 100% yours — rename parts there and the app follows).
+ - APP NEEDED (phase 1): everything red (NEEDED) or yellow (WANTED),
+   with an ORDER checkbox and ORDER QTY (pre-filled to reach green).
+   Your checks and qtys survive syncs.
+ - APP ORDER (phase 2): live view of only what you checked.
+ - "K1 Kart Log" MENU in the sheet (appears after reload):
+     * Place order — moves checked items to APP ORDERS with the date
+     * Book received — after you type QTY RECEIVED on arrived rows,
+       this sends them back into the app's stock
+ - IMPORTANT: turn OFF your old inventory scripts (the ones doing the
+   parts-used takeaway / needed math) — this system replaces them and
+   both running would subtract twice.
 
 HOW TO UPDATE (KEEPS THE SAME URL):
  1. Open the sheet -> Extensions -> Apps Script
  2. Select ALL old code, delete, paste EVERYTHING below ==CODE==. Save.
  3. Deploy -> Manage deployments -> pencil -> Version: New version -> Deploy
- 4. ONE-TIME CLEANUP: in the editor toolbar there's a function dropdown
-    (says "doPost") — pick "cleanupSheet", press Run, approve if asked.
-    Watch the tab bar reorganize itself. Done — never needs running again.
+ 4. Reload the spreadsheet tab in your browser — the "K1 Kart Log"
+    menu appears in the menu bar. (If asked to authorize again, approve.)
 
 ==CODE== (copy everything below this line)
 
@@ -44,6 +47,7 @@ function doPost(e) {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
         saveJson('snapshot', { savedAt: new Date().toISOString(),
                                karts: data.karts, shop: data.shop || [],
+                               quicks: data.quicks || [], inv: data.inv || {},
                                parts: data.parts || [] });
         var photoIndex = loadJson('photo_index', {});
         writeAllDates(ss, data);
@@ -51,6 +55,9 @@ function doPost(e) {
         writePartsUsed(ss, data);
         writeKartTabs(ss, data);
         feedPartsUsedTab(ss, data);
+        writeInventoryQty(ss, data.inv);
+        writeNeeded(ss, data.inv);
+        ensureOrderView(ss);
         return txt('ok');
       }
       return txt('ignored');
@@ -59,13 +66,23 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  var cb = (e && e.parameter && e.parameter.callback ? e.parameter.callback : 'callback').replace(/[^\w$.]/g, '');
   if (e && e.parameter && e.parameter.mode === 'snapshot') {
-    var cb = (e.parameter.callback || 'callback').replace(/[^\w$.]/g, '');
     var snap = loadJson('snapshot', null);
     var photoIndex = loadJson('photo_index', {});
     var payload = JSON.stringify({ ok: !!snap, karts: snap ? snap.karts : null,
-                                   shop: snap ? (snap.shop || []) : [], photos: photoIndex });
+                                   shop: snap ? (snap.shop || []) : [],
+                                   quicks: snap ? (snap.quicks || []) : [],
+                                   inv: snap ? (snap.inv || {}) : {},
+                                   photos: photoIndex });
     return ContentService.createTextOutput(cb + '(' + payload + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  if (e && e.parameter && e.parameter.mode === 'inv') {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var payload2 = JSON.stringify({ ok: true, names: invConfigFromSheet(ss),
+                                    receipts: loadJson('receipts', []) });
+    return ContentService.createTextOutput(cb + '(' + payload2 + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
   return txt('kart log sync is running');
@@ -363,4 +380,156 @@ function writePartsUsed(ss, data) {
   sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
   sh.getRange(1, 1, 1, 4).setFontWeight('bold');
   sh.setFrozenRows(1);
+}
+
+/* ================= v4: INVENTORY & ORDERING ================= */
+function onOpen() {
+  SpreadsheetApp.getUi().createMenu('K1 Kart Log')
+    .addItem('Phase 2 → Place order (move checked to APP ORDERS)', 'placeOrder')
+    .addItem('Book received quantities into stock', 'bookReceived')
+    .addToUi();
+}
+
+/* ---- inventory names/thresholds served to the app + receipts ---- */
+function invConfigFromSheet(ss) {
+  var sh = ss.getSheetByName('inventory');
+  var out = {};
+  if (!sh) return out;
+  var last = sh.getLastRow();
+  if (last < 2) return out;
+  var vals = sh.getRange(2, 2, last - 1, 6).getValues(); // B..G: part, name, qty, inventoried, red, green
+  for (var i = 0; i < vals.length; i++) {
+    var num = vals[i][0];
+    if (num === '' || num === null) continue;
+    out[String(num).trim().toUpperCase()] = {
+      n: String(vals[i][1] || num).trim(),
+      r: parseInt(vals[i][4], 10) || 0,
+      g: parseInt(vals[i][5], 10) || 0
+    };
+  }
+  return out;
+}
+
+/* ---- write app quantities back into the inventory tab QUANTITY column ---- */
+function writeInventoryQty(ss, inv) {
+  var sh = ss.getSheetByName('inventory');
+  if (!sh || !inv) return;
+  var last = sh.getLastRow();
+  if (last < 2) return;
+  var nums = sh.getRange(2, 2, last - 1, 1).getValues();
+  var qtys = sh.getRange(2, 4, last - 1, 1).getValues();
+  for (var i = 0; i < nums.length; i++) {
+    var key = String(nums[i][0] || '').trim().toUpperCase();
+    if (key && inv[key] !== undefined) qtys[i][0] = inv[key];
+  }
+  sh.getRange(2, 4, last - 1, 1).setValues(qtys);
+}
+
+/* ---- APP NEEDED: red + yellow items; preserves your checks & order qtys ---- */
+function writeNeeded(ss, inv) {
+  var cfg = invConfigFromSheet(ss);
+  var sh = ss.getSheetByName('APP NEEDED');
+  var kept = {}; // part -> {chk, qty}
+  if (sh) {
+    var last = sh.getLastRow();
+    if (last > 1) {
+      var old = sh.getRange(2, 1, last - 1, 8).getValues();
+      for (var i = 0; i < old.length; i++) {
+        var k = String(old[i][0] || '').trim().toUpperCase();
+        if (k) kept[k] = { chk: old[i][6] === true, qty: old[i][7] };
+      }
+    }
+    sh.clearContents();
+  } else {
+    sh = ss.insertSheet('APP NEEDED');
+  }
+  sh.getRange('A:A').setNumberFormat('@');
+  var rows = [['PART #', 'NAME', 'QTY NOW', 'RED ≤', 'GREEN ≥', 'STATUS', 'ORDER ✓', 'ORDER QTY']];
+  var colors = [['#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc','#cccccc']];
+  for (var num in cfg) {
+    var q = (inv && inv[num] !== undefined) ? inv[num] : '';
+    if (q === '') continue;
+    var c = cfg[num];
+    var status = q <= c.r ? 'NEEDED' : (q < c.g ? 'WANTED' : '');
+    if (!status) continue;
+    var keep = kept[num] || { chk: false, qty: '' };
+    var defQty = keep.qty !== '' && keep.qty !== null && keep.qty !== undefined ? keep.qty : Math.max(c.g - q, 0);
+    rows.push([num, c.n, q, c.r, c.g, status, keep.chk, defQty]);
+    var bg = status === 'NEEDED' ? '#f4c7c3' : '#fce8b2';
+    colors.push(['#ffffff', '#ffffff', bg, '#ffffff', '#ffffff', bg, '#ffffff', '#ffffff']);
+  }
+  sh.getRange(1, 1, rows.length, 8).setValues(rows).setBackgrounds(colors);
+  sh.getRange(1, 1, 1, 8).setFontWeight('bold');
+  if (rows.length > 1) sh.getRange(2, 7, rows.length - 1, 1).insertCheckboxes();
+  sh.setFrozenRows(1);
+}
+
+/* ---- APP ORDER (phase 2): live view of what you've checked ---- */
+function ensureOrderView(ss) {
+  var sh = ss.getSheetByName('APP ORDER');
+  if (!sh) {
+    sh = ss.insertSheet('APP ORDER');
+    sh.getRange(1, 1, 1, 4).setValues([['PART #', 'NAME', 'QTY NOW', 'ORDERING']]).setFontWeight('bold');
+    sh.getRange('A2').setFormula(
+      "=IFERROR(FILTER({'APP NEEDED'!A2:C, 'APP NEEDED'!H2:H}, 'APP NEEDED'!G2:G=TRUE), \"nothing checked yet\")");
+    sh.setFrozenRows(1);
+  }
+}
+
+/* ---- menu: move checked items into APP ORDERS with the date ---- */
+function placeOrder() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var needed = ss.getSheetByName('APP NEEDED');
+  if (!needed) { SpreadsheetApp.getUi().alert('No APP NEEDED tab yet.'); return; }
+  var last = needed.getLastRow();
+  if (last < 2) { SpreadsheetApp.getUi().alert('Nothing on APP NEEDED.'); return; }
+  var vals = needed.getRange(2, 1, last - 1, 8).getValues();
+  var orders = ss.getSheetByName('APP ORDERS');
+  if (!orders) {
+    orders = ss.insertSheet('APP ORDERS');
+    orders.getRange(1, 1, 1, 7).setValues([['DATE ORDERED', 'PART #', 'NAME', 'QTY ORDERED', 'QTY RECEIVED', 'DATE BOOKED', 'ORDER #']])
+      .setFontWeight('bold');
+    orders.getRange('B:B').setNumberFormat('@');
+    orders.setFrozenRows(1);
+  }
+  var today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d/yyyy');
+  var orderNo = 'ORD-' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'yyyyMMdd-HHmm');
+  var newRows = [], clearRows = [];
+  for (var i = 0; i < vals.length; i++) {
+    if (vals[i][6] === true) {
+      var qty = parseInt(vals[i][7], 10) || 0;
+      if (qty > 0) newRows.push([today, String(vals[i][0]), vals[i][1], qty, '', '', orderNo]);
+      clearRows.push(i + 2);
+    }
+  }
+  if (!newRows.length) { SpreadsheetApp.getUi().alert('Nothing checked (or all checked rows have 0 qty).'); return; }
+  orders.getRange(orders.getLastRow() + 1, 1, newRows.length, 7).setValues(newRows);
+  for (var r = 0; r < clearRows.length; r++) needed.getRange(clearRows[r], 7).setValue(false);
+  SpreadsheetApp.getUi().alert('Order ' + orderNo + ' logged: ' + newRows.length + ' items moved to APP ORDERS.\n\nWhen boxes arrive, type what you got in QTY RECEIVED, then run "Book received quantities into stock".');
+}
+
+/* ---- menu: book received quantities -> receipts the app applies ---- */
+function bookReceived() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var orders = ss.getSheetByName('APP ORDERS');
+  if (!orders) { SpreadsheetApp.getUi().alert('No APP ORDERS tab yet.'); return; }
+  var last = orders.getLastRow();
+  if (last < 2) { SpreadsheetApp.getUi().alert('No orders logged.'); return; }
+  var vals = orders.getRange(2, 1, last - 1, 7).getValues();
+  var receipts = loadJson('receipts', []);
+  var today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d/yyyy');
+  var booked = 0;
+  for (var i = 0; i < vals.length; i++) {
+    var rec = parseInt(vals[i][4], 10);
+    var alreadyBooked = vals[i][5] !== '' && vals[i][5] !== null;
+    if (!alreadyBooked && !isNaN(rec) && rec > 0) {
+      receipts.push({ id: 'rc' + Date.now() + '_' + i, part: String(vals[i][1]).toUpperCase(), qty: rec });
+      orders.getRange(i + 2, 6).setValue(today);
+      booked++;
+    }
+  }
+  if (!booked) { SpreadsheetApp.getUi().alert('Nothing to book — fill QTY RECEIVED on rows that arrived (and aren\'t booked yet).'); return; }
+  if (receipts.length > 400) receipts = receipts.slice(receipts.length - 400);
+  saveJson('receipts', receipts);
+  SpreadsheetApp.getUi().alert(booked + ' item(s) booked. The app adds them to stock next time it opens or syncs (then quantities flow back to the inventory tab).');
 }

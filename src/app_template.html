@@ -99,6 +99,14 @@
     min-height:50px; line-height:1.45; white-space:pre-wrap;
   }
   .knotes.empty { color:#667; font-style:italic; }
+  .qbadge {
+    min-width:58px; text-align:center; border-radius:9px; padding:10px 8px;
+    font-weight:800; font-size:16px; color:#fff; margin-left:8px; flex-shrink:0;
+  }
+  .q-red { background:#c1121f; } .q-yellow { background:#c78a00; color:#fff; }
+  .q-green { background:#1d7a3e; }
+  .invqbtn { background:#2f3546; color:#fff; border:none; border-radius:10px;
+    width:64px; height:56px; font-size:24px; font-weight:800; }
   /* ---------- photos ---------- */
   .photorow { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
   .thumb {
@@ -201,11 +209,45 @@
   </div>
   <div style="padding:12px 14px 0">
     <button class="hbtn" id="btnShop" style="width:100%; min-height:54px; border:1px dashed #4a5674">&#128736;&#65039; SHOP PARTS USE (not for a kart)</button>
+    <button class="hbtn" id="btnInv" style="width:100%; min-height:54px; border:1px dashed #4a5674; margin-top:8px">&#128230; INVENTORY &amp; STOCK</button>
   </div>
   <div class="sectionlabel">ADULT KARTS</div>
   <div class="grid" id="gridAdult"></div>
   <div class="sectionlabel">JUNIOR KARTS</div>
   <div class="grid" id="gridJr"></div>
+</div>
+
+<!-- ============ INVENTORY ============ -->
+<div class="screen" id="scrInv">
+  <div class="hdr">
+    <div class="backrow">
+      <button class="hbtn" id="btnBack4">&#8592; Karts</button>
+      <h1>INVENTORY</h1>
+    </div>
+  </div>
+  <div class="searchwrap">
+    <input type="search" class="in" id="invSearch" placeholder="Search parts...">
+    <div class="chiprow" id="invFilterRow" style="margin-top:8px"></div>
+  </div>
+  <div class="kd" id="invList"></div>
+</div>
+
+<!-- inventory count modal -->
+<div class="modal" id="invModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle" id="invTitle">Part</div>
+    <div id="invPhotoWrap" style="text-align:center; margin-bottom:10px"></div>
+    <div style="display:flex; align-items:center; gap:10px; justify-content:center">
+      <button class="invqbtn" id="invMinus">&#8722;</button>
+      <input type="number" class="in" id="invQty" style="width:110px; text-align:center; font-size:24px; font-weight:800" inputmode="numeric">
+      <button class="invqbtn" id="invPlus">+</button>
+    </div>
+    <p style="color:#9aa3b5; font-size:13px; margin-top:10px; text-align:center" id="invThresh"></p>
+    <div class="mactions">
+      <button class="hbtn" id="btnInvCancel">Cancel</button>
+      <button class="hbtn red" id="btnInvSave">SET COUNT</button>
+    </div>
+  </div>
 </div>
 
 <!-- ============ SHOP PARTS ============ -->
@@ -403,6 +445,7 @@
 var PARTS = /*__PARTS__*/[];  /* [num, shop name, factory alias, thumb idx] */
 var THUMBS = /*__THUMBS__*/[];
 var SEED = /*__SEED__*/{};
+var INV_SEED = /*__INVSEED__*/{};   /* {qty:{num:n}, cfg:{num:{n,r,g}}} */
 
 var REMOVED_KARTS = { "1":1, "35":1, "36":1 };  /* retired/placeholder karts */
 var ADULT_KARTS = [];
@@ -516,6 +559,9 @@ function load(){
   if (!DB.meta.up) DB.meta.up = {};             /* photo ids uploaded to Drive */
   if (!DB.meta.photoUrls) DB.meta.photoUrls = {}; /* photo id -> Drive link */
   if (!DB.shop) DB.shop = [];                     /* non-kart parts use */
+  if (!DB.inv) DB.inv = JSON.parse(JSON.stringify(INV_SEED.qty || {}));
+  if (!DB.invCfg) DB.invCfg = JSON.parse(JSON.stringify(INV_SEED.cfg || {}));
+  if (!DB.meta.rcApplied) DB.meta.rcApplied = {};   /* receipt ids already booked */
   if (!DB.quicks) DB.quicks = JSON.parse(JSON.stringify(DEFAULT_QUICKS));
   for (var qi=0; qi<DB.quicks.length; qi++){
     if (!DB.quicks[qi].s){
@@ -574,7 +620,7 @@ function buildSnapshot(){
     }
   }
   return { type:"snapshot", app:"k1kartlog", karts: karts,
-           shop: DB.shop.slice(0), quicks: DB.quicks, parts: PARTS };
+           shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv, parts: PARTS };
 }
 function syncNow(silent){
   if (!DB.meta.syncUrl){
@@ -678,6 +724,7 @@ function pullFromSheet(){
       DB.meta.photoUrls = resp.photos || {};
       if (resp.shop) DB.shop = resp.shop;
       if (resp.quicks) DB.quicks = resp.quicks;
+      if (resp.inv) DB.inv = resp.inv;
       /* photos already stored in the sheet don't need re-upload from this device */
       for (var pid in DB.meta.photoUrls) DB.meta.up[pid] = 1;
       save(); renderHome();
@@ -844,6 +891,7 @@ function renderKart(){
       div.querySelector(".delx").onclick = function(){
         if (confirm("Delete this entry?\n\n" + en.date + " — " + en.action)){
           if (en.photos){ for (var p=0;p<en.photos.length;p++) photoDel(en.photos[p]); }
+          applyInvDelta(en.parts, 1);   /* put the stock back */
           var idx = DB.karts[currentKart].entries.indexOf(en);
           if (idx > -1) DB.karts[currentKart].entries.splice(idx,1);
           save(); renderKart();
@@ -976,6 +1024,134 @@ function closeViewer(){
   viewerPid = null; viewerEntry = null;
 }
 
+/* ================= INVENTORY ================= */
+function pname(p){
+  var c = DB.invCfg[p[0].toUpperCase()];
+  return (c && c.n) ? c.n : p[1];
+}
+var PART_INDEX = null; /* num -> PARTS row, built lazily */
+function partRow(num){
+  if (!PART_INDEX){
+    PART_INDEX = {};
+    for (var i=0;i<PARTS.length;i++) PART_INDEX[PARTS[i][0].toUpperCase()] = PARTS[i];
+  }
+  return PART_INDEX[String(num).toUpperCase()] || null;
+}
+function invColor(num){
+  var q = DB.inv[num], c = DB.invCfg[num];
+  if (q === undefined || !c) return "";
+  if (q <= c.r) return "q-red";
+  if (q < c.g) return "q-yellow";
+  return "q-green";
+}
+/* stock moves when parts get logged / entries deleted */
+function applyInvDelta(partsStr, sign){
+  if (!partsStr) return;
+  var items = parsePartsString(partsStr);
+  for (var i=0;i<items.length;i++){
+    var key = items[i].num.toUpperCase();
+    if (DB.inv[key] === undefined) continue;   /* not a stocked part */
+    DB.inv[key] = Math.max(0, DB.inv[key] + sign * items[i].qty);
+  }
+}
+var invFilter = "all";
+function renderInv(){
+  var q = $("invSearch").value.trim().toUpperCase();
+  var el = $("invList"); el.innerHTML = "";
+  var shown = 0;
+  for (var num in DB.invCfg){
+    var c = DB.invCfg[num];
+    var col = invColor(num);
+    if (invFilter === "low" && col !== "q-red") continue;
+    if (invFilter === "watch" && col !== "q-yellow") continue;
+    if (q && num.indexOf(q) === -1 && c.n.toUpperCase().indexOf(q) === -1) continue;
+    shown++;
+    if (shown > 120 && q === "" && invFilter === "all"){ continue; }
+    (function(num, c){
+      var p = partRow(num);
+      var div = document.createElement("div");
+      div.className = "partitem";
+      var th = (p && p[3] >= 0 && THUMBS[p[3]]) ? '<img class="pthumb" src="'+THUMBS[p[3]]+'">' : '';
+      div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(c.n)+'</span>' +
+        '<span class="qbadge '+(invColor(num)||"q-green")+'">'+(DB.inv[num]!==undefined?DB.inv[num]:"?")+'</span>';
+      div.onclick = function(){ openInvModal(num); };
+      el.appendChild(div);
+    })(num, c);
+  }
+  if (shown > 120 && q === "" && invFilter === "all"){
+    var more = document.createElement("div");
+    more.style.cssText = "color:#667; padding:12px; text-align:center";
+    more.textContent = (shown - 120) + " more — search or filter to narrow down";
+    el.appendChild(more);
+  }
+  if (!shown) el.innerHTML = '<div style="color:#667;padding:16px;text-align:center">Nothing matches</div>';
+}
+function renderInvFilters(){
+  var row = $("invFilterRow"); row.innerHTML = "";
+  var opts = [["all","ALL"],["low","LOW (RED)"],["watch","WATCH (YELLOW)"]];
+  for (var i=0;i<opts.length;i++){
+    (function(key,label){
+      var c = document.createElement("button");
+      c.className = "chip" + (invFilter===key ? " on" : "");
+      c.textContent = label;
+      c.onclick = function(){ invFilter = key; renderInvFilters(); renderInv(); };
+      row.appendChild(c);
+    })(opts[i][0], opts[i][1]);
+  }
+}
+var invModalNum = null;
+function openInvModal(num){
+  invModalNum = num;
+  var c = DB.invCfg[num];
+  $("invTitle").textContent = num + " — " + (c ? c.n : "");
+  var p = partRow(num);
+  $("invPhotoWrap").innerHTML = (p && p[3] >= 0 && THUMBS[p[3]])
+    ? '<img src="'+THUMBS[p[3]]+'" style="width:120px;height:120px;object-fit:cover;border-radius:12px">' : '';
+  $("invQty").value = DB.inv[num] !== undefined ? DB.inv[num] : 0;
+  $("invThresh").textContent = c ? ("Red at " + c.r + " or less — green at " + c.g + " or more") : "";
+  $("invModal").className = "modal open";
+}
+
+/* pull names/thresholds + received-order bookings from the sheet on open */
+function pullInvConfig(){
+  if (!DB.meta.syncUrl) return;
+  window.__klInv = function(resp){
+    try {
+      if (!resp || !resp.ok) return;
+      var changed = false;
+      if (resp.names){
+        for (var num in resp.names){
+          var key = num.toUpperCase();
+          if (!DB.invCfg[key]) { DB.invCfg[key] = resp.names[num]; changed = true; }
+          else {
+            var c = DB.invCfg[key], n = resp.names[num];
+            if (c.n !== n.n || c.r !== n.r || c.g !== n.g){
+              c.n = n.n; c.r = n.r; c.g = n.g; changed = true;
+            }
+          }
+        }
+      }
+      if (resp.receipts){
+        for (var i=0;i<resp.receipts.length;i++){
+          var rc = resp.receipts[i];
+          if (!rc.id || DB.meta.rcApplied[rc.id]) continue;
+          var key2 = String(rc.part).toUpperCase();
+          if (DB.inv[key2] === undefined) DB.inv[key2] = 0;
+          DB.inv[key2] += (parseInt(rc.qty,10) || 0);
+          DB.meta.rcApplied[rc.id] = 1;
+          changed = true;
+          toast("Stock in: " + rc.qty + " x " + key2);
+        }
+      }
+      if (changed){ save(); if ($("scrInv").className.indexOf("active")>-1) renderInv(); }
+    } catch(e){}
+  };
+  var s = document.createElement("script");
+  s.src = DB.meta.syncUrl + (DB.meta.syncUrl.indexOf("?")>-1?"&":"?") + "mode=inv&callback=__klInv&t=" + Date.now();
+  s.onerror = function(){};
+  document.body.appendChild(s);
+}
+
 /* ================= SHOP PARTS (non-kart) ================= */
 var SHOP_QUICK = ["BRAKE CLEAN","SHOP SUPPLIES","CHARGERS","TRACK","BARRIERS","GENERAL"];
 var shopParts = [];
@@ -1002,6 +1178,7 @@ function renderShop(){
         (en.mechanic ? '<div class="emech">by '+esc(en.mechanic)+'</div>' : '');
       div.querySelector(".delx").onclick = function(){
         if (confirm("Delete this shop-use entry?\n\n" + en.date + " — " + en.usedFor)){
+          applyInvDelta(en.parts, 1);
           var idx = DB.shop.indexOf(en);
           if (idx > -1) DB.shop.splice(idx,1);
           save(); renderShop();
@@ -1055,8 +1232,8 @@ function searchShopParts(q){
   var hits = [];
   for (var i=0;i<PARTS.length && hits.length<12;i++){
     var p = PARTS[i];
-    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1 ||
-        (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
+    if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
+        p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
   function addRow(num, desc, label, thumbIdx){
     var div = document.createElement("div");
@@ -1076,7 +1253,7 @@ function searchShopParts(q){
     div.appendChild(b); res.appendChild(div);
   }
   if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"', -1); return; }
-  for (var h=0;h<hits.length;h++) addRow(hits[h][0], hits[h][1], null, hits[h][3]);
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], pname(hits[h]), null, hits[h][3]);
 }
 function renderShopSelParts(){
   var el = $("sSelParts"); el.innerHTML = "";
@@ -1111,6 +1288,7 @@ function saveShopLog(){
   }
   DB.shop.push({ date: isoToUS(dateISO), usedFor: usedFor,
                  parts: partsStr, mechanic: shopMech });
+  applyInvDelta(partsStr, -1);
   save();
   $("shopModal").className = "modal";
   renderShop();
@@ -1209,8 +1387,8 @@ function searchParts(q){
   var hits = [];
   for (var i=0;i<PARTS.length && hits.length<12;i++){
     var p = PARTS[i];
-    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1 ||
-        (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
+    if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
+        p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
   if (!hits.length){
     var div = document.createElement("div");
@@ -1228,10 +1406,10 @@ function searchParts(q){
       var div = document.createElement("div");
       div.className = "partitem";
       var th = (p[3] >= 0 && THUMBS[p[3]]) ? '<img class="pthumb" src="'+THUMBS[p[3]]+'">' : '';
-      div.innerHTML = th + '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(p[1])+'</span>';
+      div.innerHTML = th + '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(pname(p))+'</span>';
       var b = document.createElement("button");
       b.className = "padd"; b.textContent = "ADD";
-      b.onclick = function(){ addPart(p[0], p[1]); };
+      b.onclick = function(){ addPart(p[0], pname(p)); };
       div.appendChild(b);
       res.appendChild(div);
     })(hits[h]);
@@ -1312,6 +1490,7 @@ function saveLog(){
     entry.photos.push(pendingPhotos[p].id);
   }
   DB.karts[currentKart].entries.push(entry);
+  applyInvDelta(entry.parts, -1);
   /* auto updates */
   var st = DB.karts[currentKart].status;
   var ups = detectAutoUpdates(action);
@@ -1356,6 +1535,25 @@ $("btnBack").onclick = function(){ showScreen("scrHome"); renderHome(); };
 $("btnBack2").onclick = function(){ showScreen("scrHome"); renderHome(); };
 $("btnBack3").onclick = function(){ showScreen("scrHome"); renderHome(); };
 $("btnShop").onclick = function(){ renderShop(); showScreen("scrShop"); window.scrollTo(0,0); };
+$("btnInv").onclick = function(){
+  $("invSearch").value = ""; invFilter = "all";
+  renderInvFilters(); renderInv();
+  showScreen("scrInv"); window.scrollTo(0,0);
+};
+$("btnBack4").onclick = function(){ showScreen("scrHome"); renderHome(); };
+$("invSearch").addEventListener("input", renderInv);
+$("btnInvCancel").onclick = function(){ $("invModal").className = "modal"; };
+$("invMinus").onclick = function(){ $("invQty").value = Math.max(0, (parseInt($("invQty").value,10)||0) - 1); };
+$("invPlus").onclick = function(){ $("invQty").value = (parseInt($("invQty").value,10)||0) + 1; };
+$("btnInvSave").onclick = function(){
+  var v = parseInt($("invQty").value, 10);
+  if (isNaN(v) || v < 0){ toast("Enter a real count", true); return; }
+  DB.inv[invModalNum] = v;
+  save();
+  $("invModal").className = "modal";
+  renderInv();
+  toast(invModalNum + " set to " + v);
+};
 $("btnShopLog").onclick = openShopLog;
 $("btnShopLogTop").onclick = openShopLog;
 $("btnCancelShop").onclick = function(){ $("shopModal").className = "modal"; };
@@ -1402,8 +1600,8 @@ function searchQpParts(q){
   var hits = [];
   for (var i=0;i<PARTS.length && hits.length<12;i++){
     var p = PARTS[i];
-    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1 ||
-        (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
+    if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
+        p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
   function addRow(num, desc, label, thumbIdx){
     var div = document.createElement("div");
@@ -1423,7 +1621,7 @@ function searchQpParts(q){
     div.appendChild(b); res.appendChild(div);
   }
   if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"', -1); return; }
-  for (var h=0;h<hits.length;h++) addRow(hits[h][0], hits[h][1], null, hits[h][3]);
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], pname(hits[h]), null, hits[h][3]);
 }
 function renderQpSelParts(){
   var el = $("qpSelParts"); el.innerHTML = "";
@@ -1553,7 +1751,7 @@ load();
 renderHome();
 /* flush any backlog every time the app opens (e.g. after offline logging) */
 setTimeout(function(){
-  if (DB.meta.syncUrl){ syncNow(true); }
+  if (DB.meta.syncUrl){ syncNow(true); pullInvConfig(); }
 }, 2500);
 </script>
 </body>
