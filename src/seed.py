@@ -10,18 +10,15 @@ print("seeded karts:", len(seed), " entries:", sum(len(v["entries"]) for v in se
 # canonical mechanic chips (entry history keeps whatever spelling was recorded)
 MECHANICS = ["ROBERT", "WESLEY", "JOHN"]
 
-parts = []
-for line in open("parts_raw.txt", encoding="utf-8"):
-    line = line.strip()
-    if not line or "|" not in line: continue
-    num, desc = line.split("|", 1)
-    parts.append([num.strip(), desc.strip()])
-print("parts:", len(parts))
+pd = json.load(open("parts_data.json", encoding="utf-8"))
+parts, thumbs = pd["parts"], pd["thumbs"]
+print("parts:", len(parts), "thumbs:", len(thumbs))
 
 SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec"
 
 tpl = open("app_template.html", encoding="utf-8").read()
 out = tpl.replace("/*__PARTS__*/[]", json.dumps(parts, separators=(",",":")))
+out = out.replace("/*__THUMBS__*/[]", json.dumps(thumbs, separators=(",",":")))
 assert '/*__SYNCURL__*/""' in out
 out = out.replace('/*__SYNCURL__*/""', json.dumps(SYNC_URL))
 out = out.replace("/*__SEED__*/{}", json.dumps(seed, separators=(",",":")))

@@ -160,6 +160,7 @@
     padding:10px 12px; margin-bottom:6px; font-size:14px;
   }
   .partitem .pn { font-weight:800; color:#6fa3e8; margin-right:8px; white-space:nowrap; }
+  .pthumb { width:46px; height:46px; object-fit:cover; border-radius:8px; margin-right:9px; flex-shrink:0; background:#fff; }
   .partitem .pd { color:#c9d2e3; flex:1; font-size:13px; }
   .padd { background:#1d7a3e; border:none; color:#fff; border-radius:8px; padding:9px 13px; font-weight:800; font-size:15px; margin-left:8px; min-height:40px;}
   .selparts { margin-top:8px; }
@@ -374,7 +375,8 @@
 <script>
 "use strict";
 /* ================= DATA ================= */
-var PARTS = /*__PARTS__*/[];
+var PARTS = /*__PARTS__*/[];  /* [num, shop name, factory alias, thumb idx] */
+var THUMBS = /*__THUMBS__*/[];
 var SEED = /*__SEED__*/{};
 
 var ADULT_KARTS = [];
@@ -1002,12 +1004,14 @@ function searchShopParts(q){
   var hits = [];
   for (var i=0;i<PARTS.length && hits.length<12;i++){
     var p = PARTS[i];
-    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1) hits.push(p);
+    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1 ||
+        (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
-  function addRow(num, desc, label){
+  function addRow(num, desc, label, thumbIdx){
     var div = document.createElement("div");
     div.className = "partitem";
-    div.innerHTML = '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+'</span>';
+    var th = (thumbIdx >= 0 && THUMBS[thumbIdx]) ? '<img class="pthumb" src="'+THUMBS[thumbIdx]+'">' : '';
+    div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+'</span>';
     var b = document.createElement("button");
     b.className = "padd"; b.textContent = label || "ADD";
     b.onclick = function(){
@@ -1020,8 +1024,8 @@ function searchShopParts(q){
     };
     div.appendChild(b); res.appendChild(div);
   }
-  if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"'); return; }
-  for (var h=0;h<hits.length;h++) addRow(hits[h][0], hits[h][1]);
+  if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"', -1); return; }
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], hits[h][1], null, hits[h][3]);
 }
 function renderShopSelParts(){
   var el = $("sSelParts"); el.innerHTML = "";
@@ -1135,7 +1139,8 @@ function searchParts(q){
   var hits = [];
   for (var i=0;i<PARTS.length && hits.length<12;i++){
     var p = PARTS[i];
-    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1) hits.push(p);
+    if (p[0].toUpperCase().indexOf(q) > -1 || p[1].toUpperCase().indexOf(q) > -1 ||
+        (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
   if (!hits.length){
     var div = document.createElement("div");
@@ -1152,7 +1157,8 @@ function searchParts(q){
     (function(p){
       var div = document.createElement("div");
       div.className = "partitem";
-      div.innerHTML = '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(p[1])+'</span>';
+      var th = (p[3] >= 0 && THUMBS[p[3]]) ? '<img class="pthumb" src="'+THUMBS[p[3]]+'">' : '';
+      div.innerHTML = th + '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(p[1])+'</span>';
       var b = document.createElement("button");
       b.className = "padd"; b.textContent = "ADD";
       b.onclick = function(){ addPart(p[0], p[1]); };
