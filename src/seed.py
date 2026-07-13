@@ -8,7 +8,7 @@ seed = json.load(open("seed_full.json", encoding="utf-8"))
 print("seeded karts:", len(seed), " entries:", sum(len(v["entries"]) for v in seed.values()))
 
 # canonical mechanic chips (entry history keeps whatever spelling was recorded)
-MECHANICS = ["ROBERT", "WESLEY", "EMMETT", "JOHN"]
+MECHANICS = ["ROBERT", "WESLEY", "JOHN"]
 
 parts = []
 for line in open("parts_raw.txt", encoding="utf-8"):
@@ -21,15 +21,12 @@ print("parts:", len(parts))
 SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec"
 
 tpl = open("app_template.html", encoding="utf-8").read()
-sheetjs = open("sheetjs.min.js", encoding="utf-8").read()
 out = tpl.replace("/*__PARTS__*/[]", json.dumps(parts, separators=(",",":")))
 assert '/*__SYNCURL__*/""' in out
 out = out.replace('/*__SYNCURL__*/""', json.dumps(SYNC_URL))
 out = out.replace("/*__SEED__*/{}", json.dumps(seed, separators=(",",":")))
-assert 'mechanics:["ROBERT","WESLEY","EMMETT"]' in out
-out = out.replace('mechanics:["ROBERT","WESLEY","EMMETT"]',
+assert 'mechanics:["ROBERT","WESLEY","JOHN"]' in out
+out = out.replace('mechanics:["ROBERT","WESLEY","JOHN"]',
                   'mechanics:' + json.dumps(MECHANICS, separators=(",",":")))
-i = out.find("/*__SHEETJS__*/")
-out = out[:i] + sheetjs + out[i+len("/*__SHEETJS__*/"):]
 open("kart_log.html", "w", encoding="utf-8").write(out)
 print("wrote kart_log.html", len(out), "chars")

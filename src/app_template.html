@@ -196,7 +196,7 @@
 <div class="screen active" id="scrHome">
   <div class="hdr">
     <h1><span class="red">K1</span> KART LOG</h1>
-    <button class="hbtn" id="btnExportScr">Export</button>
+    <button class="hbtn" id="btnExportScr">Settings</button>
   </div>
   <div style="padding:12px 14px 0">
     <button class="hbtn" id="btnShop" style="width:100%; min-height:54px; border:1px dashed #4a5674">&#128736;&#65039; SHOP PARTS USE (not for a kart)</button>
@@ -254,7 +254,7 @@
   <div class="hdr">
     <div class="backrow">
       <button class="hbtn" id="btnBack2">&#8592; Back</button>
-      <h1>EXPORT</h1>
+      <h1>SETTINGS</h1>
     </div>
   </div>
   <div class="exportcard">
@@ -265,11 +265,6 @@
     <button class="hbtn red" id="btnSyncNow">Sync to Google Sheet Now</button>
     <button class="hbtn" id="btnPullSheet">Load From Google Sheet (restore)</button>
     <p id="syncStatus" style="margin-top:6px"></p>
-  </div>
-  <div class="exportcard">
-    <h3>Excel Export</h3>
-    <p>Makes an .xlsx file with one sheet per kart in the same layout as the shop spreadsheet (DATE, ACTION COMPLETED, parts used, MECHANIC, NOTES + tracked dates), plus an ALL DATES summary sheet.</p>
-    <button class="hbtn red" id="btnXlsx">Download Excel (.xlsx)</button>
   </div>
   <div class="exportcard">
     <h3>Backup &amp; Restore</h3>
@@ -376,7 +371,6 @@
   </div>
 </div>
 
-<script>/*__SHEETJS__*/</script>
 <script>
 "use strict";
 /* ================= DATA ================= */
@@ -468,7 +462,7 @@ function load(){
     try { DB = JSON.parse(raw); } catch(e){ DB = null; }
   }
   if (!DB) {
-    DB = { karts:{}, mechanics:["ROBERT","WESLEY","EMMETT"] };
+    DB = { karts:{}, mechanics:["ROBERT","WESLEY","JOHN"] };
     var all = ADULT_KARTS.concat(JR_KARTS);
     for (var i=0;i<all.length;i++){
       var k = all[i];
@@ -486,6 +480,11 @@ function load(){
   if (!DB.meta.up) DB.meta.up = {};             /* photo ids uploaded to Drive */
   if (!DB.meta.photoUrls) DB.meta.photoUrls = {}; /* photo id -> Drive link */
   if (!DB.shop) DB.shop = [];                     /* non-kart parts use */
+  if (!DB.meta.emmettRemoved){
+    var _ei = DB.mechanics.indexOf("EMMETT");
+    if (_ei > -1) DB.mechanics.splice(_ei, 1);
+    DB.meta.emmettRemoved = true;
+  }
   var allk = ADULT_KARTS.concat(JR_KARTS);
   for (var m=0;m<allk.length;m++){
     if (!DB.karts[allk[m]]) DB.karts[allk[m]] = { status: blankStatus(), entries: [], knotes:"" };
@@ -1246,103 +1245,6 @@ function saveLog(){
   toast("Saved — Kart " + currentKart);
 }
 
-/* ================= EXPORT ================= */
-var HDR = ["DATE","ACTION COMPLETED","parts used","MECHANIC","NOTES",
-  "CHAIN DATE","DIFF DATE","BRAKE FLUSH","BAT 1 DATE","BAT 2 DATE","BAT 3 DATE","BAT 4 DATE",
-  "WELD","WELD COUNT"];
-
-function partsUsedRows(){
-  var desc = {};
-  for (var p=0;p<PARTS.length;p++) desc[PARTS[p][0].toUpperCase()] = PARTS[p][1];
-  var tot = {}, last = {};
-  var all = ADULT_KARTS.concat(JR_KARTS);
-  var sources = [];
-  for (var i=0;i<all.length;i++) sources.push(DB.karts[all[i]].entries);
-  sources.push(DB.shop);
-  for (var s2=0;s2<sources.length;s2++){
-    var es = sources[s2];
-    for (var j=0;j<es.length;j++){
-      var en = es[j];
-      if (!en.parts) continue;
-      var items = String(en.parts).split(",");
-      for (var t=0;t<items.length;t++){
-        var it = items[t].trim();
-        if (!it) continue;
-        var m = it.match(/^(.+?)\s*[xX]\s*(\d+)$/);
-        var num = m ? m[1].trim().toUpperCase() : it.toUpperCase();
-        var qty = m ? (parseInt(m[2],10) || 1) : 1;
-        tot[num] = (tot[num]||0) + qty;
-        var d = parseDate(en.date);
-        if (d && (!last[num] || d > last[num])) last[num] = d;
-      }
-    }
-  }
-  var rows = [["PART NUMBER","DESCRIPTION","TOTAL USED","LAST USED"]];
-  var nums = [];
-  for (var n in tot) nums.push(n);
-  nums.sort(function(a,b){ return tot[b]-tot[a]; });
-  for (var q=0;q<nums.length;q++){
-    var nm = nums[q];
-    var lu = last[nm] ? (last[nm].getMonth()+1)+"/"+last[nm].getDate()+"/"+last[nm].getFullYear() : "";
-    rows.push([nm, desc[nm]||"", tot[nm], lu]);
-  }
-  return rows;
-}
-function buildWorkbook(){
-  var wb = XLSX.utils.book_new();
-  var all = ADULT_KARTS.concat(JR_KARTS);
-  /* ALL DATES summary first */
-  var sumRows = [["KART","CHAIN","DIFF","BRAKE FLUSH","BAT 1","BAT 2","BAT 3","BAT 4","WELD COUNT","KART NOTES"]];
-  for (var s=0;s<all.length;s++){
-    var stt = DB.karts[all[s]].status;
-    sumRows.push([all[s], stt.chain, stt.diff, stt.brake, stt.bat1, stt.bat2, stt.bat3, stt.bat4, stt.weld||0, DB.karts[all[s]].knotes||""]);
-  }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sumRows), "ALL DATES");
-  /* parts used (inventory) */
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(partsUsedRows()), "PARTS USED");
-  /* shop (non-kart) parts use */
-  var shopRows = [["DATE","USED FOR","PARTS USED","MECHANIC"]];
-  var shopSorted = DB.shop.slice().sort(function(a,b){
-    var da = parseDate(a.date), db_ = parseDate(b.date);
-    return (da?da.getTime():0) - (db_?db_.getTime():0);
-  });
-  for (var sh=0;sh<shopSorted.length;sh++){
-    var se = shopSorted[sh];
-    shopRows.push([se.date, se.usedFor, se.parts, se.mechanic]);
-  }
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(shopRows), "SHOP PARTS");
-  /* per-kart sheets */
-  for (var i=0;i<all.length;i++){
-    var k = all[i];
-    var st = DB.karts[k].status;
-    var rows = [HDR];
-    rows.push(["","","","", DB.karts[k].knotes||"", st.chain, st.diff, st.brake, st.bat1, st.bat2, st.bat3, st.bat4,
-      "", st.weld||0]);
-    var entries = DB.karts[k].entries.slice().sort(function(a,b){
-      var da = parseDate(a.date), db_ = parseDate(b.date);
-      return (da?da.getTime():0) - (db_?db_.getTime():0);
-    });
-    for (var e=0;e<entries.length;e++){
-      var en = entries[e];
-      var notes = en.notes || "";
-      var np = (en.photos && en.photos.length) || 0;
-      if (np) notes = (notes ? notes + " " : "") + "[" + np + " photo" + (np>1?"s":"") + " in app]";
-      rows.push([en.date, en.action, en.parts, en.mechanic, notes]);
-    }
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), k);
-  }
-  return wb;
-}
-function downloadXlsx(){
-  try {
-    var wb = buildWorkbook();
-    XLSX.writeFile(wb, "kart_log_" + todayISO() + ".xlsx");
-    toast("Excel file created");
-  } catch(err){
-    toast("Export failed: " + err.message, true);
-  }
-}
-
 /* ================= BACKUP ================= */
 function doBackup(){
   var out = $("backupOut");
@@ -1390,7 +1292,6 @@ $("btnLog").onclick = openLog;
 $("btnLogTop").onclick = openLog;
 $("btnCancelLog").onclick = closeLog;
 $("btnSaveLog").onclick = saveLog;
-$("btnXlsx").onclick = downloadXlsx;
 $("btnBackup").onclick = doBackup;
 $("btnShowImport").onclick = function(){
   var a = $("importArea");
