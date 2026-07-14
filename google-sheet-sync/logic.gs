@@ -461,7 +461,7 @@ function placeOrderImpl() {
     return;
   }
   orders.getRange(orders.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
-  for (var r = 0; r < clearRows.length; r++) needed.getRange(clearRows[r], 8).setValue(false);
+  for (var r = 0; r < clearRows.length; r++) needed.getRange(clearRows[r], 8, 1, 2).setValues([[false, '']]);
   var msg = 'Order ' + orderNo + ' logged: ' + newRows.length + ' items moved to APP ORDERS.';
   if (skipped) msg += '\n\n' + skipped + ' checked item(s) SKIPPED — no ORDER QTY typed.';
   msg += '\n\nWhen boxes arrive, type what you got in QTY RECEIVED, then run "Book received quantities into stock".';
