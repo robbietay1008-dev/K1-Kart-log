@@ -103,8 +103,7 @@
     min-width:58px; text-align:center; border-radius:9px; padding:10px 8px;
     font-weight:800; font-size:16px; color:#fff; margin-left:8px; flex-shrink:0;
   }
-  .q-red { background:#c1121f; } .q-yellow { background:#c78a00; color:#fff; }
-  .q-green { background:#1d7a3e; }
+  .q-grey { background:#2f3546; } .q-green { background:#1d7a3e; }
   .invqbtn { background:#2f3546; color:#fff; border:none; border-radius:10px;
     width:64px; height:56px; font-size:24px; font-weight:800; }
   /* ---------- photos ---------- */
@@ -228,6 +227,10 @@
   <div class="searchwrap">
     <input type="search" class="in" id="invSearch" placeholder="Search parts...">
     <div class="chiprow" id="invFilterRow" style="margin-top:8px"></div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px">
+      <span id="invProgress" style="color:#9aa3b5; font-weight:700; font-size:14px"></span>
+      <button class="hbtn" id="btnInvReset" style="min-height:42px; padding:8px 14px; font-size:14px">RESET COUNTS</button>
+    </div>
   </div>
   <div class="kd" id="invList"></div>
 </div>
@@ -562,6 +565,7 @@ function load(){
   if (!DB.inv) DB.inv = JSON.parse(JSON.stringify(INV_SEED.qty || {}));
   if (!DB.invCfg) DB.invCfg = JSON.parse(JSON.stringify(INV_SEED.cfg || {}));
   if (!DB.meta.rcApplied) DB.meta.rcApplied = {};   /* receipt ids already booked */
+  if (!DB.invCounted) DB.invCounted = {};           /* parts recounted this cycle */
   if (!DB.quicks) DB.quicks = JSON.parse(JSON.stringify(DEFAULT_QUICKS));
   for (var qi=0; qi<DB.quicks.length; qi++){
     if (!DB.quicks[qi].s){
@@ -1037,13 +1041,7 @@ function partRow(num){
   }
   return PART_INDEX[String(num).toUpperCase()] || null;
 }
-function invColor(num){
-  var q = DB.inv[num], c = DB.invCfg[num];
-  if (q === undefined || !c) return "";
-  if (q <= c.r) return "q-red";
-  if (q < c.g) return "q-yellow";
-  return "q-green";
-}
+
 /* stock moves when parts get logged / entries deleted */
 function applyInvDelta(partsStr, sign){
   if (!partsStr) return;
@@ -1058,25 +1056,29 @@ var invFilter = "all";
 function renderInv(){
   var q = $("invSearch").value.trim().toUpperCase();
   var el = $("invList"); el.innerHTML = "";
-  var shown = 0;
+  var shown = 0, total = 0, counted = 0;
+  for (var n2 in DB.invCfg){ total++; if (DB.invCounted[n2]) counted++; }
+  $("invProgress").textContent = "Counted " + counted + " / " + total;
   for (var num in DB.invCfg){
     var c = DB.invCfg[num];
-    var col = invColor(num);
-    if (invFilter === "low" && col !== "q-red") continue;
-    if (invFilter === "watch" && col !== "q-yellow") continue;
+    var done = !!DB.invCounted[num];
+    if (invFilter === "todo" && done) continue;
+    if (invFilter === "done" && !done) continue;
     if (q && num.indexOf(q) === -1 && c.n.toUpperCase().indexOf(q) === -1) continue;
     shown++;
     if (shown > 120 && q === "" && invFilter === "all"){ continue; }
-    (function(num, c){
+    (function(num, c, done){
       var p = partRow(num);
       var div = document.createElement("div");
       div.className = "partitem";
+      if (done) div.style.borderColor = "#1d7a3e";
       var th = (p && p[3] >= 0 && THUMBS[p[3]]) ? '<img class="pthumb" src="'+THUMBS[p[3]]+'">' : '';
-      div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(c.n)+'</span>' +
-        '<span class="qbadge '+(invColor(num)||"q-green")+'">'+(DB.inv[num]!==undefined?DB.inv[num]:"?")+'</span>';
+      div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(c.n)+
+        (done ? ' <span style="color:#4caf7a;font-weight:800">&#10003; counted</span>' : '')+'</span>' +
+        '<span class="qbadge '+(done ? "q-green" : "q-grey")+'">'+(DB.inv[num]!==undefined?DB.inv[num]:"?")+'</span>';
       div.onclick = function(){ openInvModal(num); };
       el.appendChild(div);
-    })(num, c);
+    })(num, c, done);
   }
   if (shown > 120 && q === "" && invFilter === "all"){
     var more = document.createElement("div");
@@ -1088,7 +1090,7 @@ function renderInv(){
 }
 function renderInvFilters(){
   var row = $("invFilterRow"); row.innerHTML = "";
-  var opts = [["all","ALL"],["low","LOW (RED)"],["watch","WATCH (YELLOW)"]];
+  var opts = [["all","ALL"],["todo","TO COUNT"],["done","COUNTED"]];
   for (var i=0;i<opts.length;i++){
     (function(key,label){
       var c = document.createElement("button");
@@ -1549,10 +1551,19 @@ $("btnInvSave").onclick = function(){
   var v = parseInt($("invQty").value, 10);
   if (isNaN(v) || v < 0){ toast("Enter a real count", true); return; }
   DB.inv[invModalNum] = v;
+  DB.invCounted[invModalNum] = 1;
   save();
   $("invModal").className = "modal";
   renderInv();
-  toast(invModalNum + " set to " + v);
+  toast(invModalNum + " set to " + v + " — counted");
+};
+$("btnInvReset").onclick = function(){
+  var n = 0; for (var k in DB.invCounted) n++;
+  if (!n){ toast("Nothing to reset — no parts marked counted"); return; }
+  if (!confirm("Reset all " + n + " counted checkmarks?\n\nQuantities stay as they are — this just clears the \u2713 marks for the next recount round.")) return;
+  DB.invCounted = {};
+  save(); renderInv();
+  toast("Recount checklist reset");
 };
 $("btnShopLog").onclick = openShopLog;
 $("btnShopLogTop").onclick = openShopLog;
