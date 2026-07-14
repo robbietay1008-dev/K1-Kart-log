@@ -73,21 +73,19 @@ function cleanupImpl() {
     var sh = ss.getSheetByName(goners[g]);
     if (sh) { ss.deleteSheet(sh); deleted.push(goners[g]); }
   }
-  var karts = [];
-  for (var i = 2; i <= 53; i++) if (i !== 35 && i !== 36) karts.push(String(i));
-  var order = ['APP ALL DATES', 'APP LOG', 'APP PARTS USED', 'APP PHOTOS',
-               'APP NEEDED', 'APP ORDER', 'APP ORDERS', 'inventory']
-              .concat(karts).concat(['template']);
+  /* only move the front tabs — kart tabs already sit in order behind them */
+  var front = ['APP ALL DATES', 'APP LOG', 'APP PARTS USED', 'APP PHOTOS',
+               'APP NEEDED', 'APP ORDER', 'APP ORDERS', 'inventory'];
   var pos = 1;
-  for (var j = 0; j < order.length; j++) {
-    var sh2 = ss.getSheetByName(order[j]);
+  for (var j = 0; j < front.length; j++) {
+    var sh2 = ss.getSheetByName(front[j]);
     if (!sh2) continue;
     ss.setActiveSheet(sh2, true);
     ss.moveActiveSheet(pos++);
   }
   ss.setActiveSheet(ss.getSheetByName('APP ALL DATES') || ss.getSheets()[0], true);
   try {
-    SpreadsheetApp.getUi().alert('Cleanup done. Deleted: ' +
+    SpreadsheetApp.getUi().alert('Cleanup done. Deleted this run: ' +
       (deleted.length ? deleted.join(', ') : 'nothing (already clean)') + '.');
   } catch (err) {}
 }
