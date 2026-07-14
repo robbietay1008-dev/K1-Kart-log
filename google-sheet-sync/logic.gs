@@ -439,7 +439,7 @@ function placeOrderImpl() {
   var orders = ss.getSheetByName('APP ORDERS');
   if (!orders) {
     orders = ss.insertSheet('APP ORDERS');
-    orders.getRange(1, 1, 1, 7).setValues([['DATE ORDERED', 'PART #', 'NAME', 'QTY ORDERED', 'QTY RECEIVED', 'DATE BOOKED', 'ORDER #']])
+    orders.getRange(1, 1, 1, 8).setValues([['DATE ORDERED', 'PART #', 'NAME', 'QTY ORDERED', 'QTY RECEIVED', 'QTY BOOKED', 'LAST BOOKED', 'ORDER #']])
       .setFontWeight('bold');
     orders.getRange('B:B').setNumberFormat('@');
     orders.setFrozenRows(1);
@@ -450,7 +450,7 @@ function placeOrderImpl() {
   for (var i = 0; i < vals.length; i++) {
     if (vals[i][7] === true) {
       var qty = parseInt(vals[i][8], 10) || 0;
-      if (qty > 0) { newRows.push([today, String(vals[i][0]), vals[i][1], qty, '', '', orderNo]); clearRows.push(i + 2); }
+      if (qty > 0) { newRows.push([today, String(vals[i][0]), vals[i][1], qty, '', 0, '', orderNo]); clearRows.push(i + 2); }
       else skipped++;
     }
   }
@@ -460,7 +460,7 @@ function placeOrderImpl() {
       : 'Nothing checked.');
     return;
   }
-  orders.getRange(orders.getLastRow() + 1, 1, newRows.length, 7).setValues(newRows);
+  orders.getRange(orders.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
   for (var r = 0; r < clearRows.length; r++) needed.getRange(clearRows[r], 8).setValue(false);
   var msg = 'Order ' + orderNo + ' logged: ' + newRows.length + ' items moved to APP ORDERS.';
   if (skipped) msg += '\n\n' + skipped + ' checked item(s) SKIPPED — no ORDER QTY typed.';
@@ -475,21 +475,24 @@ function bookReceivedImpl() {
   if (!orders) { SpreadsheetApp.getUi().alert('No APP ORDERS tab yet.'); return; }
   var last = orders.getLastRow();
   if (last < 2) { SpreadsheetApp.getUi().alert('No orders logged.'); return; }
-  var vals = orders.getRange(2, 1, last - 1, 7).getValues();
+  var vals = orders.getRange(2, 1, last - 1, 8).getValues();
   var receipts = loadJson('receipts', []);
   var today = Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d/yyyy');
-  var booked = 0;
+  var booked = 0, units = 0;
   for (var i = 0; i < vals.length; i++) {
-    var rec = parseInt(vals[i][4], 10);
-    var alreadyBooked = vals[i][5] !== '' && vals[i][5] !== null;
-    if (!alreadyBooked && !isNaN(rec) && rec > 0) {
-      receipts.push({ id: 'rc' + Date.now() + '_' + i, part: String(vals[i][1]).toUpperCase(), qty: rec });
-      orders.getRange(i + 2, 6).setValue(today);
-      booked++;
+    var received = parseInt(vals[i][4], 10);
+    var already = parseInt(vals[i][5], 10) || 0;
+    if (isNaN(received)) continue;
+    var delta = received - already;
+    if (delta > 0) {
+      receipts.push({ id: 'rc' + Date.now() + '_' + i, part: String(vals[i][1]).toUpperCase(), qty: delta });
+      orders.getRange(i + 2, 6).setValue(received);   // QTY BOOKED = new running total
+      orders.getRange(i + 2, 7).setValue(today);      // LAST BOOKED
+      booked++; units += delta;
     }
   }
-  if (!booked) { SpreadsheetApp.getUi().alert('Nothing to book — fill QTY RECEIVED on rows that arrived (and aren\'t booked yet).'); return; }
+  if (!booked) { SpreadsheetApp.getUi().alert('Nothing new to book — QTY RECEIVED matches what\'s already booked on every row.'); return; }
   if (receipts.length > 400) receipts = receipts.slice(receipts.length - 400);
   saveJson('receipts', receipts);
-  SpreadsheetApp.getUi().alert(booked + ' item(s) booked. The app adds them to stock next time it opens or syncs (then quantities flow back to the inventory tab).');
+  SpreadsheetApp.getUi().alert(booked + ' row(s), ' + units + ' unit(s) booked into stock. The app applies them next time it opens or syncs. Split shipments: just raise QTY RECEIVED when the rest arrives and book again — only the new amount gets added.');
 }
