@@ -1284,7 +1284,25 @@ function pullInvConfig(){
           toast("Stock in: " + rc.qty + " x " + key2);
         }
       }
+      /* photo reconciliation: re-queue anything the sheet never actually stored */
+      if (resp.have){
+        var haveMap = {};
+        for (var h2=0;h2<resp.have.length;h2++) haveMap[resp.have[h2]] = 1;
+        var all2 = ADULT_KARTS.concat(JR_KARTS);
+        for (var a2=0;a2<all2.length;a2++){
+          var es3 = DB.karts[all2[a2]].entries;
+          for (var e3=0;e3<es3.length;e3++){
+            var ph3 = es3[e3].photos || [];
+            for (var p3=0;p3<ph3.length;p3++){
+              if (!haveMap[ph3[p3]] && DB.meta.up[ph3[p3]]){
+                DB.meta.up[ph3[p3]] = 0; changed = true;
+              }
+            }
+          }
+        }
+      }
       if (changed){ save(); if ($("scrInv").className.indexOf("active")>-1) renderInv(); }
+      setTimeout(uploadPendingPhotos, 1500);
     } catch(e){}
   };
   var s = document.createElement("script");

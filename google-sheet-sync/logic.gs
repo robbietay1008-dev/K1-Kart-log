@@ -60,7 +60,8 @@ function handleGet(e) {
   if (e && e.parameter && e.parameter.mode === 'inv') {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var payload2 = JSON.stringify({ ok: true, names: invConfigFromSheet(ss),
-                                    receipts: loadJson('receipts', []) });
+                                    receipts: loadJson('receipts', []),
+                                    have: Object.keys(loadJson('photo_index', {})) });
     return ContentService.createTextOutput(cb + '(' + payload2 + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
