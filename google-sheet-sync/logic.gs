@@ -22,6 +22,8 @@ function handlePost(e) {
         saveJson('snapshot', { savedAt: new Date().toISOString(),
                                karts: data.karts, shop: data.shop || [],
                                quicks: data.quicks || [], inv: data.inv || {},
+                               tomb: data.tomb || {}, stamps: data.stamps || {},
+                               invTouched: data.invTouched || {}, rc: data.rc || {},
                                parts: data.parts || [] });
         var photoIndex = loadJson('photo_index', {});
         writeAllDates(ss, data);
@@ -47,6 +49,10 @@ function handleGet(e) {
                                    shop: snap ? (snap.shop || []) : [],
                                    quicks: snap ? (snap.quicks || []) : [],
                                    inv: snap ? (snap.inv || {}) : {},
+                                   tomb: snap ? (snap.tomb || {}) : {},
+                                   stamps: snap ? (snap.stamps || {}) : {},
+                                   invTouched: snap ? (snap.invTouched || {}) : {},
+                                   rc: snap ? (snap.rc || {}) : {},
                                    photos: photoIndex });
     return ContentService.createTextOutput(cb + '(' + payload + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);

@@ -472,6 +472,12 @@ var LS_KEY = "k1kartlog_v1";
 var DEFAULT_SYNC_URL = /*__SYNCURL__*/"";
 var DB = null;
 
+function djb2(s){
+  var h = 5381;
+  for (var i=0;i<s.length;i++) h = ((h << 5) + h + s.charCodeAt(i)) & 0xffffffff;
+  return (h >>> 0).toString(36);
+}
+function newEntryId(){ return "e" + Date.now().toString(36) + Math.floor(Math.random()*46656).toString(36); }
 function blankStatus(){
   return { chain:"", diff:"", brake:"", bat1:"", bat2:"", bat3:"", bat4:"", weld:0 };
 }
@@ -566,6 +572,21 @@ function load(){
   if (!DB.invCfg) DB.invCfg = JSON.parse(JSON.stringify(INV_SEED.cfg || {}));
   if (!DB.meta.rcApplied) DB.meta.rcApplied = {};   /* receipt ids already booked */
   if (!DB.invCounted) DB.invCounted = {};           /* parts recounted this cycle */
+  if (!DB.tomb) DB.tomb = {};                       /* deleted entry ids */
+  if (!DB.stamps) DB.stamps = { karts:{}, quicks:0 };
+  if (!DB.stamps.karts) DB.stamps.karts = {};
+  if (!DB.invTouched) DB.invTouched = {};
+  /* deterministic ids for pre-merge entries (same seed => same ids on every device) */
+  var allids = ADULT_KARTS.concat(JR_KARTS);
+  for (var ii=0; ii<allids.length; ii++){
+    var kk = allids[ii], es2 = DB.karts[kk].entries;
+    for (var jj=0; jj<es2.length; jj++){
+      if (!es2[jj].id) es2[jj].id = "h" + djb2(kk+"|"+jj+"|"+(es2[jj].date||"")+"|"+(es2[jj].action||"")+"|"+(es2[jj].parts||"")+"|"+(es2[jj].mechanic||""));
+    }
+  }
+  for (var ss2=0; ss2<DB.shop.length; ss2++){
+    if (!DB.shop[ss2].id) DB.shop[ss2].id = "h" + djb2("shop|"+ss2+"|"+(DB.shop[ss2].date||"")+"|"+(DB.shop[ss2].usedFor||"")+"|"+(DB.shop[ss2].parts||""));
+  }
   if (!DB.quicks) DB.quicks = JSON.parse(JSON.stringify(DEFAULT_QUICKS));
   for (var qi=0; qi<DB.quicks.length; qi++){
     if (!DB.quicks[qi].s){
@@ -617,14 +638,109 @@ function buildSnapshot(){
     for (var e=0;e<src.entries.length;e++){
       var en = src.entries[e];
       karts[k].entries.push({
-        date: en.date, action: en.action, parts: en.parts,
+        id: en.id, date: en.date, action: en.action, parts: en.parts,
         mechanic: en.mechanic, notes: en.notes,
         photos: (en.photos || []).slice(0)
       });
     }
   }
   return { type:"snapshot", app:"k1kartlog", karts: karts,
-           shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv, parts: PARTS };
+           shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv,
+           tomb: DB.tomb, stamps: DB.stamps, invTouched: DB.invTouched,
+           rc: DB.meta.rcApplied, parts: PARTS };
+}
+var pullSeq = 0;
+function pullSnapshot(cb){
+  if (!DB.meta.syncUrl){ cb(null); return; }
+  var name = "__klPull" + (++pullSeq);
+  var done = false;
+  var timer = setTimeout(function(){
+    if (done) return;
+    done = true; delete window[name]; cb(null);
+  }, 8000);
+  window[name] = function(resp){
+    if (done) return;
+    done = true; clearTimeout(timer); delete window[name];
+    cb(resp || null);
+  };
+  var s = document.createElement("script");
+  s.src = DB.meta.syncUrl + (DB.meta.syncUrl.indexOf("?")>-1?"&":"?") + "mode=snapshot&callback=" + name + "&t=" + Date.now();
+  s.onerror = function(){ if (!done){ done = true; clearTimeout(timer); delete window[name]; cb(null); } };
+  document.body.appendChild(s);
+}
+function mergeRemote(r){
+  if (!r || !r.ok) return false;
+  var changed = false;
+  var rt = r.tomb || {};
+  for (var tid in rt){ if (!DB.tomb[tid]){ DB.tomb[tid] = rt[tid]; changed = true; } }
+  var rstamps = r.stamps || {}; var rkstamps = rstamps.karts || {};
+  var all = ADULT_KARTS.concat(JR_KARTS);
+  var rk = r.karts || {};
+  for (var i=0;i<all.length;i++){
+    var k = all[i], rem = rk[k];
+    var loc = DB.karts[k];
+    if (rem){
+      var have = {};
+      for (var j=0;j<loc.entries.length;j++) if (loc.entries[j].id) have[loc.entries[j].id] = 1;
+      var re = rem.entries || [];
+      for (var j2=0;j2<re.length;j2++){
+        var en = re[j2];
+        if (!en.id || have[en.id] || DB.tomb[en.id]) continue;
+        var photos = en.photos;
+        if (typeof photos === "number" || !photos) photos = [];
+        loc.entries.push({ id: en.id, date: en.date||"", action: en.action||"", parts: en.parts||"",
+                           mechanic: en.mechanic||"", notes: en.notes||"", photos: photos });
+        changed = true;
+      }
+      var rs = rkstamps[k] || 0, ls = DB.stamps.karts[k] || 0;
+      if (rs > ls){
+        if (rem.status) loc.status = rem.status;
+        loc.knotes = rem.knotes || "";
+        DB.stamps.karts[k] = rs;
+        changed = true;
+      }
+    }
+    for (var j3=loc.entries.length-1;j3>=0;j3--){
+      if (loc.entries[j3].id && DB.tomb[loc.entries[j3].id]){ loc.entries.splice(j3,1); changed = true; }
+    }
+  }
+  /* shop */
+  var haveS = {};
+  for (var s1=0;s1<DB.shop.length;s1++) if (DB.shop[s1].id) haveS[DB.shop[s1].id] = 1;
+  var rshop = r.shop || [];
+  for (var s2=0;s2<rshop.length;s2++){
+    var se = rshop[s2];
+    if (!se.id || haveS[se.id] || DB.tomb[se.id]) continue;
+    DB.shop.push({ id: se.id, date: se.date||"", usedFor: se.usedFor||"", parts: se.parts||"", mechanic: se.mechanic||"" });
+    changed = true;
+  }
+  for (var s3=DB.shop.length-1;s3>=0;s3--){
+    if (DB.shop[s3].id && DB.tomb[DB.shop[s3].id]){ DB.shop.splice(s3,1); changed = true; }
+  }
+  /* quicks */
+  var rq = rstamps.quicks || 0;
+  if (r.quicks && r.quicks.length && rq > (DB.stamps.quicks || 0)){
+    DB.quicks = r.quicks; DB.stamps.quicks = rq; changed = true;
+  }
+  /* inventory per part, newest touch wins */
+  var rit = r.invTouched || {}, rin = r.inv || {};
+  for (var num in rit){
+    if (rin[num] !== undefined && rit[num] > (DB.invTouched[num] || 0)){
+      DB.inv[num] = rin[num]; DB.invTouched[num] = rit[num]; changed = true;
+    }
+  }
+  /* receipt-applied + photo link unions */
+  var rrc = r.rc || {};
+  for (var rid in rrc){ if (!DB.meta.rcApplied[rid]){ DB.meta.rcApplied[rid] = 1; changed = true; } }
+  var rp = r.photos || {};
+  for (var pid in rp){ if (!DB.meta.photoUrls[pid]){ DB.meta.photoUrls[pid] = rp[pid]; changed = true; } }
+  return changed;
+}
+function refreshActive(){
+  if ($("scrKart").className.indexOf("active") > -1 && currentKart) renderKart();
+  else if ($("scrShop").className.indexOf("active") > -1) renderShop();
+  else if ($("scrInv").className.indexOf("active") > -1) renderInv();
+  else renderHome();
 }
 function syncNow(silent){
   if (!DB.meta.syncUrl){
@@ -632,9 +748,16 @@ function syncNow(silent){
     return;
   }
   if (typeof fetch !== "function"){
-    if (!silent) toast("This browser can't sync — use Excel export", true);
+    if (!silent) toast("This browser can't sync", true);
     return;
   }
+  /* pull + merge first so no device ever overwrites another's work */
+  pullSnapshot(function(resp){
+    try { if (mergeRemote(resp)){ saveQuiet(); refreshActive(); } } catch(e){}
+    pushSnapshot(silent);
+  });
+}
+function pushSnapshot(silent){
   var body = JSON.stringify(buildSnapshot());
   fetch(DB.meta.syncUrl, {
     method: "POST",
@@ -720,7 +843,7 @@ function pullFromSheet(){
           var en = es[j];
           var photos = en.photos;
           if (typeof photos === "number" || !photos) photos = [];
-          entries.push({ date:en.date||"", action:en.action||"", parts:en.parts||"",
+          entries.push({ id:en.id, date:en.date||"", action:en.action||"", parts:en.parts||"",
                          mechanic:en.mechanic||"", notes:en.notes||"", photos:photos });
         }
         DB.karts[k].entries = entries;
@@ -729,6 +852,10 @@ function pullFromSheet(){
       if (resp.shop) DB.shop = resp.shop;
       if (resp.quicks) DB.quicks = resp.quicks;
       if (resp.inv) DB.inv = resp.inv;
+      if (resp.tomb) DB.tomb = resp.tomb;
+      if (resp.stamps) DB.stamps = resp.stamps;
+      if (resp.invTouched) DB.invTouched = resp.invTouched;
+      if (resp.rc) DB.meta.rcApplied = resp.rc;
       /* photos already stored in the sheet don't need re-upload from this device */
       for (var pid in DB.meta.photoUrls) DB.meta.up[pid] = 1;
       save(); renderHome();
@@ -867,7 +994,7 @@ function renderKart(){
     var v = prompt("Weld count for kart " + currentKart, String(st.weld||0));
     if (v === null) return;
     var n = parseInt(v,10);
-    if (!isNaN(n) && n >= 0){ st.weld = n; save(); renderKart(); }
+    if (!isNaN(n) && n >= 0){ st.weld = n; DB.stamps.karts[currentKart] = Date.now(); save(); renderKart(); }
   };
   /* history */
   var hl = $("historyList"); hl.innerHTML = "";
@@ -896,6 +1023,7 @@ function renderKart(){
         if (confirm("Delete this entry?\n\n" + en.date + " — " + en.action)){
           if (en.photos){ for (var p=0;p<en.photos.length;p++) photoDel(en.photos[p]); }
           applyInvDelta(en.parts, 1);   /* put the stock back */
+          if (en.id) DB.tomb[en.id] = Date.now();
           var idx = DB.karts[currentKart].entries.indexOf(en);
           if (idx > -1) DB.karts[currentKart].entries.splice(idx,1);
           save(); renderKart();
@@ -917,13 +1045,13 @@ function editDateField(f, label){
   var st = DB.karts[currentKart].status;
   var v = prompt(label + " date (M/D/YYYY):", st[f] || "");
   if (v === null) return;
-  st[f] = v.trim(); save(); renderKart();
+  st[f] = v.trim(); DB.stamps.karts[currentKart] = Date.now(); save(); renderKart();
 }
 function editTextField(f, label){
   var st = DB.karts[currentKart].status;
   var v = prompt(label + ":", st[f] || "");
   if (v === null) return;
-  st[f] = v.trim(); save(); renderKart();
+  st[f] = v.trim(); DB.stamps.karts[currentKart] = Date.now(); save(); renderKart();
 }
 
 /* ================= ENTRY PHOTOS ================= */
@@ -1042,6 +1170,15 @@ function partRow(num){
   return PART_INDEX[String(num).toUpperCase()] || null;
 }
 
+/* background: absorb other devices' work every couple of minutes */
+setInterval(function(){
+  if (!DB.meta.syncUrl) return;
+  if (typeof document.hidden === "boolean" && document.hidden) return;
+  pullSnapshot(function(resp){
+    try { if (mergeRemote(resp)){ saveQuiet(); refreshActive(); toast("Updated from other devices"); } } catch(e){}
+  });
+}, 120000);
+
 /* stock moves when parts get logged / entries deleted */
 function applyInvDelta(partsStr, sign){
   if (!partsStr) return;
@@ -1050,6 +1187,7 @@ function applyInvDelta(partsStr, sign){
     var key = items[i].num.toUpperCase();
     if (DB.inv[key] === undefined) continue;   /* not a stocked part */
     DB.inv[key] = Math.max(0, DB.inv[key] + sign * items[i].qty);
+    DB.invTouched[key] = Date.now();
   }
 }
 var invFilter = "all";
@@ -1140,6 +1278,7 @@ function pullInvConfig(){
           var key2 = String(rc.part).toUpperCase();
           if (DB.inv[key2] === undefined) DB.inv[key2] = 0;
           DB.inv[key2] += (parseInt(rc.qty,10) || 0);
+          DB.invTouched[key2] = Date.now();
           DB.meta.rcApplied[rc.id] = 1;
           changed = true;
           toast("Stock in: " + rc.qty + " x " + key2);
@@ -1181,6 +1320,7 @@ function renderShop(){
       div.querySelector(".delx").onclick = function(){
         if (confirm("Delete this shop-use entry?\n\n" + en.date + " — " + en.usedFor)){
           applyInvDelta(en.parts, 1);
+          if (en.id) DB.tomb[en.id] = Date.now();
           var idx = DB.shop.indexOf(en);
           if (idx > -1) DB.shop.splice(idx,1);
           save(); renderShop();
@@ -1288,7 +1428,7 @@ function saveShopLog(){
     if (i) partsStr += ", ";
     partsStr += shopParts[i].num + " x" + shopParts[i].qty;
   }
-  DB.shop.push({ date: isoToUS(dateISO), usedFor: usedFor,
+  DB.shop.push({ id: newEntryId(), date: isoToUS(dateISO), usedFor: usedFor,
                  parts: partsStr, mechanic: shopMech });
   applyInvDelta(partsStr, -1);
   save();
@@ -1485,7 +1625,7 @@ function saveLog(){
     if (i) partsStr += ", ";
     partsStr += selectedParts[i].num + " x" + selectedParts[i].qty;
   }
-  var entry = { date: dateUS, action: action, parts: partsStr,
+  var entry = { id: newEntryId(), date: dateUS, action: action, parts: partsStr,
                 mechanic: selectedMech, notes: $("fNotes").value.trim(), photos: [] };
   for (var p=0;p<pendingPhotos.length;p++){
     photoPut(pendingPhotos[p].id, pendingPhotos[p].dataURL);
@@ -1500,6 +1640,7 @@ function saveLog(){
     if (ups[u][0] === "weld") st.weld = (st.weld||0) + 1;
     else st[ups[u][0]] = dateUS;
   }
+  if (ups.length) DB.stamps.karts[currentKart] = Date.now();
   save();
   closeLog();
   renderKart(); renderHome();
@@ -1551,6 +1692,7 @@ $("btnInvSave").onclick = function(){
   var v = parseInt($("invQty").value, 10);
   if (isNaN(v) || v < 0){ toast("Enter a real count", true); return; }
   DB.inv[invModalNum] = v;
+  DB.invTouched[invModalNum] = Date.now();
   DB.invCounted[invModalNum] = 1;
   save();
   $("invModal").className = "modal";
@@ -1680,7 +1822,7 @@ function renderQpList(){
       db.className = "sprem"; db.innerHTML = "&#10005;";
       db.onclick = function(){
         if (confirm('Remove quick pick "' + qk.l + '"?')){
-          DB.quicks.splice(idx, 1); save(); renderQpList();
+          DB.quicks.splice(idx, 1); DB.stamps.quicks = Date.now(); save(); renderQpList();
         }
       };
       div.appendChild(eb); div.appendChild(db);
@@ -1711,6 +1853,7 @@ $("btnQpSave").onclick = function(){
   }
   if (qpEditIndex > -1) DB.quicks[qpEditIndex] = { l: l.toUpperCase(), p: p, s: qpScope };
   else DB.quicks.push({ l: l.toUpperCase(), p: p, s: qpScope });
+  DB.stamps.quicks = Date.now();
   save(); renderQpList();
   $("qpModal").className = "modal";
   toast("Quick picks saved");
@@ -1735,6 +1878,7 @@ $("photoInput").addEventListener("change", function(){
 $("btnKnotesCancel").onclick = function(){ $("knotesModal").className = "modal"; };
 $("btnKnotesSave").onclick = function(){
   DB.karts[currentKart].knotes = $("knotesText").value.trim();
+  DB.stamps.karts[currentKart] = Date.now();
   save();
   $("knotesModal").className = "modal";
   renderKart();
