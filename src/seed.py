@@ -17,8 +17,11 @@ print("parts:", len(parts), "thumbs:", len(thumbs))
 
 SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec"
 
+import time as _t
+BUILD = _t.strftime("%m%d-%H%M")
 tpl = open("app_template.html", encoding="utf-8").read()
-out = tpl.replace("/*__PARTS__*/[]", json.dumps(parts, separators=(",",":")))
+out = tpl.replace('/*__BUILD__*/"dev"', json.dumps(BUILD))
+out = out.replace("/*__PARTS__*/[]", json.dumps(parts, separators=(",",":")))
 out = out.replace("/*__THUMBS__*/[]", json.dumps(thumbs, separators=(",",":")))
 out = out.replace("/*__INVSEED__*/{}", json.dumps(inv_seed, separators=(",",":")))
 assert '/*__SYNCURL__*/""' in out

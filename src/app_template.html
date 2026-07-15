@@ -334,6 +334,7 @@
     <p id="mechList"></p>
     <button class="hbtn" id="btnAddMech">Add Mechanic</button>
   </div>
+  <p style="text-align:center; color:#566; font-size:12px; padding:4px 0 20px" id="buildTag"></p>
 </div>
 
 <!-- ============ LOG ENTRY MODAL ============ -->
@@ -469,6 +470,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
+var APP_BUILD = /*__BUILD__*/"dev";
 var DEFAULT_SYNC_URL = /*__SYNCURL__*/"";
 var DB = null;
 
@@ -644,7 +646,7 @@ function buildSnapshot(){
       });
     }
   }
-  return { type:"snapshot", app:"k1kartlog", karts: karts,
+  return { type:"snapshot", app:"k1kartlog", appBuild: APP_BUILD, karts: karts,
            shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv,
            tomb: DB.tomb, stamps: DB.stamps, invTouched: DB.invTouched,
            rc: DB.meta.rcApplied, parts: PARTS };
@@ -1922,6 +1924,7 @@ $("pvDelete").onclick = function(){
 
 load();
 renderHome();
+if ($("buildTag")) $("buildTag").textContent = "build " + APP_BUILD;
 /* flush any backlog every time the app opens (e.g. after offline logging) */
 setTimeout(function(){
   if (DB.meta.syncUrl){ syncNow(true); pullInvConfig(); }

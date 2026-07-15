@@ -19,7 +19,7 @@ function handlePost(e) {
       if (data.type === 'photo') { savePhoto(data); return txt('ok photo'); }
       if (data.type === 'snapshot') {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
-        saveJson('snapshot', { savedAt: new Date().toISOString(),
+        saveJson('snapshot', { savedAt: new Date().toISOString(), appBuild: data.appBuild || '',
                                karts: data.karts, shop: data.shop || [],
                                quicks: data.quicks || [], inv: data.inv || {},
                                tomb: data.tomb || {}, stamps: data.stamps || {},
@@ -45,7 +45,9 @@ function handleGet(e) {
   if (e && e.parameter && e.parameter.mode === 'snapshot') {
     var snap = loadJson('snapshot', null);
     var photoIndex = loadJson('photo_index', {});
-    var payload = JSON.stringify({ ok: !!snap, karts: snap ? snap.karts : null,
+    var payload = JSON.stringify({ ok: !!snap, appBuild: snap ? (snap.appBuild || '') : '',
+                                   savedAt: snap ? (snap.savedAt || '') : '',
+                                   karts: snap ? snap.karts : null,
                                    shop: snap ? (snap.shop || []) : [],
                                    quicks: snap ? (snap.quicks || []) : [],
                                    inv: snap ? (snap.inv || {}) : {},
