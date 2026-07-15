@@ -153,12 +153,12 @@ function savePhoto(data) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = photoSheet(ss);
   var row = sh.getLastRow() + 1;
-  sh.getRange(row, 1, 1, 3).setValues([[data.kart || '?', data.date || '', data.id]]);
   var blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', data.id + '.jpg');
-  var img = sh.insertImage(blob, 4, row);
+  var img = sh.insertImage(blob, 4, row);   // image first: if this throws, no orphan row
   var w = img.getWidth(), h = img.getHeight();
   if (w > 240) { img.setHeight(Math.round(h * 240 / w)); img.setWidth(240); }
   sh.setRowHeight(row, Math.max(img.getHeight() + 10, 60));
+  sh.getRange(row, 1, 1, 3).setValues([[data.kart || '?', data.date || '', data.id]]);
   index[data.id] = ss.getUrl() + '#gid=' + sh.getSheetId() + '&range=D' + row;
   saveJson('photo_index', index);
 }

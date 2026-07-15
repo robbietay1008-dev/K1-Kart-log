@@ -522,6 +522,22 @@ function photoDel(id){
 function newPhotoId(){
   return "p" + Date.now() + "_" + Math.floor(Math.random()*100000);
 }
+/* Sheets refuses embedded images over ~1M pixels — shrink upload copies to fit */
+function shrinkForSheet(dataURL, cb){
+  var img = new Image();
+  img.onload = function(){
+    var w = img.width, h = img.height;
+    if (w * h <= 950000){ cb(dataURL); return; }
+    var scale = Math.sqrt(950000 / (w * h));
+    var nw = Math.max(1, Math.floor(w * scale)), nh = Math.max(1, Math.floor(h * scale));
+    var cv = document.createElement("canvas");
+    cv.width = nw; cv.height = nh;
+    cv.getContext("2d").drawImage(img, 0, 0, nw, nh);
+    cb(cv.toDataURL("image/jpeg", 0.65));
+  };
+  img.onerror = function(){ cb(dataURL); };
+  img.src = dataURL;
+}
 /* shrink to max 1280px JPEG so hundreds of photos fit on the iPad */
 function compressImage(file, cb){
   var reader = new FileReader();
@@ -813,15 +829,17 @@ function uploadPendingPhotos(){
         if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); uploadPendingPhotos(); }
         return;
       }
-      fetch(DB.meta.syncUrl, {
-        method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain"},
-        body: JSON.stringify({app:"k1kartlog", type:"photo", id:job.id,
-                              kart:job.kart, date:job.date, dataURL:dataURL})
-      }).then(function(){
-        DB.meta.up[job.id] = 1;
-        if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); uploadPendingPhotos(); }
-      })["catch"](function(){
-        if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); }
+      shrinkForSheet(dataURL, function(small){
+        fetch(DB.meta.syncUrl, {
+          method:"POST", mode:"no-cors", headers:{"Content-Type":"text/plain"},
+          body: JSON.stringify({app:"k1kartlog", type:"photo", id:job.id,
+                                kart:job.kart, date:job.date, dataURL:small})
+        }).then(function(){
+          DB.meta.up[job.id] = 1;
+          if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); uploadPendingPhotos(); }
+        })["catch"](function(){
+          if (++done === jobs.length){ photoUploadBusy = false; saveQuiet(); }
+        });
       });
     });
   });
