@@ -137,29 +137,44 @@ function loadJson(name, fallback) {
 /* ================= photos: embedded in APP PHOTOS tab ================= */
 function photoSheet(ss) {
   var sh = ss.getSheetByName('APP PHOTOS');
-  if (!sh) {
-    sh = ss.insertSheet('APP PHOTOS');
-    sh.getRange(1, 1, 1, 4).setValues([['KART', 'DATE', 'PHOTO ID', 'PHOTO']]);
-    sh.setColumnWidth(4, 260);
-  }
+  if (!sh) sh = ss.insertSheet('APP PHOTOS');
+  sh.getRange(1, 1, 1, 4).setValues([['KART', 'DATE', 'PHOTO', '']]).setFontWeight('bold');
+  sh.getRange('A:A').setHorizontalAlignment('center');
+  sh.getRange('B:B').setHorizontalAlignment('center');
+  sh.setColumnWidth(3, 260);
   return sh;
 }
 function savePhoto(data) {
   if (!data.id || !data.dataURL) throw 'photo missing id/dataURL';
   var index = loadJson('photo_index', {});
   if (index[data.id]) return;
-  var base64 = String(data.dataURL).split(',')[1];
-  if (!base64) throw 'bad dataURL';
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sh = photoSheet(ss);
   var row = sh.getLastRow() + 1;
-  var blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', data.id + '.jpg');
-  var img = sh.insertImage(blob, 4, row);   // image first: if this throws, no orphan row
-  var w = img.getWidth(), h = img.getHeight();
-  if (w > 240) { img.setHeight(Math.round(h * 240 / w)); img.setWidth(240); }
-  sh.setRowHeight(row, Math.max(img.getHeight() + 10, 60));
-  sh.getRange(row, 1, 1, 3).setValues([[data.kart || '?', data.date || '', data.id]]);
-  index[data.id] = ss.getUrl() + '#gid=' + sh.getSheetId() + '&range=D' + row;
+  var placed = false;
+  try {
+    // in-cell image: locked to the cell, sorts and moves with the row
+    var cellImg = SpreadsheetApp.newCellImage()
+      .setSourceUrl(String(data.dataURL))
+      .setAltTextTitle(data.id)
+      .build();
+    sh.getRange(row, 3).setValue(cellImg);
+    sh.setRowHeight(row, 150);
+    placed = true;
+  } catch (err) {
+    // fallback: floating image anchored at the cell
+    var base64 = String(data.dataURL).split(',')[1];
+    if (!base64) throw 'bad dataURL';
+    var blob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/jpeg', data.id + '.jpg');
+    var img = sh.insertImage(blob, 3, row);
+    var w = img.getWidth(), h = img.getHeight();
+    if (w > 240) { img.setHeight(Math.round(h * 240 / w)); img.setWidth(240); }
+    sh.setRowHeight(row, Math.max(img.getHeight() + 10, 60));
+    placed = true;
+  }
+  if (!placed) throw 'image placement failed';
+  sh.getRange(row, 1, 1, 2).setValues([[data.kart || '?', data.date || '']]);
+  index[data.id] = ss.getUrl() + '#gid=' + sh.getSheetId() + '&range=C' + row;
   saveJson('photo_index', index);
 }
 
@@ -263,7 +278,7 @@ function photoCell(photos, index) {
   for (var i = 0; i < photos.length; i++) {
     var u = index[photos[i]];
     if (u) {
-      var m = u.match(/range=D(\d+)/);
+      var m = u.match(/range=[A-Z](\d+)/);
       locs.push(m ? 'APP PHOTOS row ' + m[1] : u);
     } else missing++;
   }
