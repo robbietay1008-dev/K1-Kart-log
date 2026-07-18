@@ -360,7 +360,10 @@
     <div class="chiprow" id="mechRow"></div>
 
     <label class="f">PHOTOS (optional)</label>
-    <button class="photobtn" id="btnAddPhoto">&#128247; Add Photo</button>
+    <div style="display:flex; gap:8px">
+      <button class="photobtn" id="btnTakePhoto" style="margin-top:0">&#128247; Take Photo</button>
+      <button class="photobtn" id="btnAddPhoto" style="margin-top:0">&#128444;&#65039; From Library</button>
+    </div>
     <div class="photorow" id="formPhotos"></div>
 
     <label class="f">NOTES (optional)</label>
@@ -388,6 +391,7 @@
 
 <!-- hidden camera / library input -->
 <input type="file" id="photoInput" accept="image/*" multiple style="display:none">
+<input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
 
 <!-- quick pick editor modal -->
 <div class="modal" id="qpModal">
@@ -470,7 +474,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0715-2015";
+var APP_BUILD = "0718-1739";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1051,7 +1055,7 @@ function renderKart(){
       };
       div.querySelector(".camx").onclick = function(){
         photoTarget = en;
-        $("photoInput").click();
+        $("cameraInput").click();
       };
       renderEntryPhotos(en, div.querySelector(".photorow"));
       hl.appendChild(div);
@@ -1909,7 +1913,12 @@ $("btnAddMech").onclick = function(){
 $("fPartSearch").addEventListener("input", function(){ searchParts(this.value); });
 $("fAction").addEventListener("input", updateAutoNote);
 $("btnAddPhoto").onclick = function(){ photoTarget = "form"; $("photoInput").click(); };
+$("btnTakePhoto").onclick = function(){ photoTarget = "form"; $("cameraInput").click(); };
 $("photoInput").addEventListener("change", function(){
+  handlePhotoFiles(this.files);
+  this.value = "";
+});
+$("cameraInput").addEventListener("change", function(){
   handlePhotoFiles(this.files);
   this.value = "";
 });
