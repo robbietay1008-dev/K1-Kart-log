@@ -1308,6 +1308,9 @@ function pullInvConfig(){
           toast("Stock in: " + rc.qty + " x " + key2);
         }
       }
+      if (resp.last && resp.last.errs && resp.last.errs.length){
+        toast("SHEET WRITE PROBLEM: " + resp.last.errs[0], true);
+      }
       /* photo reconciliation: re-queue anything the sheet never actually stored */
       if (resp.have){
         var haveMap = {};

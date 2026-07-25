@@ -474,7 +474,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0718-1739";
+var APP_BUILD = "0725-0357";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1307,6 +1307,9 @@ function pullInvConfig(){
           changed = true;
           toast("Stock in: " + rc.qty + " x " + key2);
         }
+      }
+      if (resp.last && resp.last.errs && resp.last.errs.length){
+        toast("SHEET WRITE PROBLEM: " + resp.last.errs[0], true);
       }
       /* photo reconciliation: re-queue anything the sheet never actually stored */
       if (resp.have){

@@ -26,14 +26,17 @@ function handlePost(e) {
                                invTouched: data.invTouched || {}, rc: data.rc || {},
                                parts: data.parts || [] });
         var photoIndex = loadJson('photo_index', {});
-        writeAllDates(ss, data);
-        writeLog(ss, data, photoIndex);
-        writePartsUsed(ss, data);
-        writeKartTabs(ss, data);
-        writeInventoryQty(ss, data.inv);
-        writeNeeded(ss, data.inv);
-        ensureOrderView(ss);
-        return txt('ok');
+        var errs = [];
+        function step(name, fn){ try { fn(); } catch (err2) { errs.push(name + ': ' + err2); } }
+        step('all dates', function(){ writeAllDates(ss, data); });
+        step('log', function(){ writeLog(ss, data, photoIndex); });
+        step('parts used', function(){ writePartsUsed(ss, data); });
+        step('kart tabs', function(){ writeKartTabs(ss, data); });
+        step('inventory qty', function(){ writeInventoryQty(ss, data.inv); });
+        step('needed', function(){ writeNeeded(ss, data.inv); });
+        step('order view', function(){ ensureOrderView(ss); });
+        saveJson('lastSync', { at: new Date().toISOString(), build: data.appBuild || '', errs: errs });
+        return txt(errs.length ? 'ok with errors: ' + errs.join(' | ') : 'ok');
       }
       return txt('ignored');
     } finally { lock.releaseLock(); }
@@ -63,7 +66,8 @@ function handleGet(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var payload2 = JSON.stringify({ ok: true, names: invConfigFromSheet(ss),
                                     receipts: loadJson('receipts', []),
-                                    have: Object.keys(loadJson('photo_index', {})) });
+                                    have: Object.keys(loadJson('photo_index', {})),
+                                    last: loadJson('lastSync', null) });
     return ContentService.createTextOutput(cb + '(' + payload2 + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
@@ -240,18 +244,29 @@ function writeAllDates(ss, data) {
   rng.setValues(rows);
   rng.setBackgrounds(colors);
   sh.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
+  sh.getRange(1, 12).setValue('updated ' +
+    Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d h:mm a'));
   sh.setFrozenRows(1);
 }
 var KART_HDR = ['DATE', 'ACTION COMPLETED', 'parts used', 'MECHANIC', 'NOTES',
                 'CHAIN DATE', 'DIFF DATE', 'BRAKE FLUSH', 'BAT 1 DATE', 'BAT 2 DATE',
                 'BAT 3 DATE', 'BAT 4 DATE', 'WELD COUNT'];
+function kartSig(s) {
+  var h = 5381;
+  for (var i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) % 4294967296;
+  return String(h);
+}
 function writeKartTabs(ss, data) {
+  var sigs = loadJson('kart_sigs', {});
   var ks = kartOrder(data.karts);
+  var wrote = 0;
   for (var i = 0; i < ks.length; i++) {
     var k = ks[i];
+    var kd = data.karts[k], st = kd.status || {};
+    var sig = kartSig(JSON.stringify(kd));
+    if (sigs[k] === sig) continue;   // unchanged since last write
     var sh = ss.getSheetByName(k);
     if (!sh) sh = ss.insertSheet(k);
-    var kd = data.karts[k], st = kd.status || {};
     var rows = [KART_HDR.slice()];
     rows.push(['', '', '', '', kd.knotes || '', st.chain || '', st.diff || '', st.brake || '',
                st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '', st.weld || 0]);
@@ -268,7 +283,10 @@ function writeKartTabs(ss, data) {
     sh.getRange('I:L').setNumberFormat('@');
     sh.getRange(1, 1, rows.length, KART_HDR.length).setValues(rows);
     sh.getRange(1, 1, 1, KART_HDR.length).setFontWeight('bold');
+    sigs[k] = sig;
+    wrote++;
   }
+  if (wrote) saveJson('kart_sigs', sigs);
 }
 function photoCell(photos, index) {
   if (!photos) return '';
