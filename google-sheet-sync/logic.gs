@@ -421,6 +421,7 @@ function writeInventoryQty(ss, inv, cfgFromApp) {
     var newRows = [];
     for (var num in inv) {
       if (found[num]) continue;
+      if (!(inv[num] > 0)) continue;   // only parts actually holding stock
       var c = cfgFromApp[num];
       if (!c || /\(RETIRED\)/i.test(c.n || '')) continue;
       newRows.push(['', num, c.n || num, inv[num], '', c.r || 0, c.g || 0]);
