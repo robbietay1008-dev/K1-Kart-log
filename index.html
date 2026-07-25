@@ -474,7 +474,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0725-0357";
+var APP_BUILD = "0725-1503";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -667,7 +667,7 @@ function buildSnapshot(){
     }
   }
   return { type:"snapshot", app:"k1kartlog", appBuild: APP_BUILD, karts: karts,
-           shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv,
+           shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv, invCfg: DB.invCfg,
            tomb: DB.tomb, stamps: DB.stamps, invTouched: DB.invTouched,
            rc: DB.meta.rcApplied, parts: PARTS };
 }
@@ -1286,9 +1286,15 @@ function pullInvConfig(){
       if (resp.names){
         for (var num in resp.names){
           var key = num.toUpperCase();
-          if (!DB.invCfg[key]) { DB.invCfg[key] = resp.names[num]; changed = true; }
+          var n = resp.names[num];
+          if (n.retired){
+            if (DB.invCfg[key]){ delete DB.invCfg[key]; delete DB.inv[key];
+              delete DB.invTouched[key]; delete DB.invCounted[key]; changed = true; }
+            continue;
+          }
+          if (!DB.invCfg[key]) { DB.invCfg[key] = { n: n.n, r: n.r, g: n.g }; changed = true; }
           else {
-            var c = DB.invCfg[key], n = resp.names[num];
+            var c = DB.invCfg[key];
             if (c.n !== n.n || c.r !== n.r || c.g !== n.g){
               c.n = n.n; c.r = n.r; c.g = n.g; changed = true;
             }

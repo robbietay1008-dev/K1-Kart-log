@@ -24,7 +24,7 @@ function handlePost(e) {
                                quicks: data.quicks || [], inv: data.inv || {},
                                tomb: data.tomb || {}, stamps: data.stamps || {},
                                invTouched: data.invTouched || {}, rc: data.rc || {},
-                               parts: data.parts || [] });
+                               invCfg: data.invCfg || {}, parts: data.parts || [] });
         var photoIndex = loadJson('photo_index', {});
         var errs = [];
         function step(name, fn){ try { fn(); } catch (err2) { errs.push(name + ': ' + err2); } }
@@ -32,7 +32,7 @@ function handlePost(e) {
         step('log', function(){ writeLog(ss, data, photoIndex); });
         step('parts used', function(){ writePartsUsed(ss, data); });
         step('kart tabs', function(){ writeKartTabs(ss, data); });
-        step('inventory qty', function(){ writeInventoryQty(ss, data.inv); });
+        step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg); });
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
         saveJson('lastSync', { at: new Date().toISOString(), build: data.appBuild || '', errs: errs });
@@ -388,28 +388,49 @@ function invConfigFromSheet(ss) {
   for (var i = 0; i < vals.length; i++) {
     var num = vals[i][0];
     if (num === '' || num === null) continue;
+    var nm = String(vals[i][1] || num).trim();
     out[String(num).trim().toUpperCase()] = {
-      n: String(vals[i][1] || num).trim(),
+      n: nm,
       r: parseInt(vals[i][4], 10) || 0,
-      g: parseInt(vals[i][5], 10) || 0
+      g: parseInt(vals[i][5], 10) || 0,
+      retired: /\(RETIRED\)/i.test(nm) ? 1 : 0
     };
   }
   return out;
 }
 
 /* ---- write app quantities back into the inventory tab QUANTITY column ---- */
-function writeInventoryQty(ss, inv) {
+function writeInventoryQty(ss, inv, cfgFromApp) {
   var sh = ss.getSheetByName('inventory');
   if (!sh || !inv) return;
   var last = sh.getLastRow();
-  if (last < 2) return;
-  var nums = sh.getRange(2, 2, last - 1, 1).getValues();
-  var qtys = sh.getRange(2, 4, last - 1, 1).getValues();
-  for (var i = 0; i < nums.length; i++) {
-    var key = String(nums[i][0] || '').trim().toUpperCase();
-    if (key && inv[key] !== undefined) qtys[i][0] = inv[key];
+  var found = {};
+  if (last >= 2) {
+    var nums = sh.getRange(2, 2, last - 1, 1).getValues();
+    var qtys = sh.getRange(2, 4, last - 1, 1).getValues();
+    for (var i = 0; i < nums.length; i++) {
+      var key = String(nums[i][0] || '').trim().toUpperCase();
+      if (!key) continue;
+      found[key] = true;
+      if (inv[key] !== undefined) qtys[i][0] = inv[key];
+    }
+    sh.getRange(2, 4, last - 1, 1).setValues(qtys);
   }
-  sh.getRange(2, 4, last - 1, 1).setValues(qtys);
+  /* the app's rule: if it's in the app, it's on the sheet — append missing rows */
+  if (cfgFromApp) {
+    var newRows = [];
+    for (var num in inv) {
+      if (found[num]) continue;
+      var c = cfgFromApp[num];
+      if (!c || /\(RETIRED\)/i.test(c.n || '')) continue;
+      newRows.push(['', num, c.n || num, inv[num], '', c.r || 0, c.g || 0]);
+    }
+    if (newRows.length) {
+      var start = sh.getLastRow() + 1;
+      sh.getRange(start, 2, newRows.length, 1).setNumberFormat('@');
+      sh.getRange(start, 1, newRows.length, 7).setValues(newRows);
+    }
+  }
 }
 
 /* ---- APP NEEDED: red + yellow items; preserves your checks & order qtys ---- */
