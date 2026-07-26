@@ -78,29 +78,37 @@ function txt(s) { return ContentService.createTextOutput(s); }
 
 /* ================= ONE-TIME CLEANUP (run manually once) ================= */
 function cleanupImpl() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var goners = ['EXAMPLE', 'ALL DATES', 'Restocks', 'needed', 'ordering',
-                '_invState', 'parts used', 'full', '1', '35', '36'];
-  var deleted = [];
-  for (var g = 0; g < goners.length; g++) {
-    var sh = ss.getSheetByName(goners[g]);
-    if (sh) { ss.deleteSheet(sh); deleted.push(goners[g]); }
-  }
-  /* only move the front tabs — kart tabs already sit in order behind them */
-  var front = ['APP ALL DATES', 'APP LOG', 'APP PARTS USED', 'APP PHOTOS',
-               'APP NEEDED', 'APP ORDER', 'APP ORDERS', 'inventory'];
-  var pos = 1;
-  for (var j = 0; j < front.length; j++) {
-    var sh2 = ss.getSheetByName(front[j]);
-    if (!sh2) continue;
-    ss.setActiveSheet(sh2, true);
-    ss.moveActiveSheet(pos++);
-  }
-  ss.setActiveSheet(ss.getSheetByName('APP ALL DATES') || ss.getSheets()[0], true);
+  /* Watchdog: rebuild tabs from the stored snapshot when they've fallen
+     behind (runs on a time trigger); also the menu's force-rebuild. */
+  var snap = loadJson('snapshot', null);
+  if (!snap || !snap.karts) return;
+  var interactive = false;
+  try { SpreadsheetApp.getUi(); interactive = true; } catch (e) {}
+  var last = loadJson('lastSync', null);
+  var snapAt = new Date(snap.savedAt || 0).getTime();
+  var lastAt = last ? new Date(last.at || 0).getTime() : 0;
+  var lastHadErrors = last && last.errs && last.errs.length > 0;
+  if (!interactive && lastAt >= snapAt && !lastHadErrors) return; // all current
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return;
   try {
-    SpreadsheetApp.getUi().alert('Cleanup done. Deleted this run: ' +
-      (deleted.length ? deleted.join(', ') : 'nothing (already clean)') + '.');
-  } catch (err) {}
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var photoIndex = loadJson('photo_index', {});
+    var errs = [];
+    function step(name, fn){ try { fn(); } catch (err2) { errs.push(name + ': ' + err2); } }
+    step('all dates', function(){ writeAllDates(ss, snap); });
+    step('log', function(){ writeLog(ss, snap, photoIndex); });
+    step('parts used', function(){ writePartsUsed(ss, snap); });
+    step('kart tabs', function(){ writeKartTabs(ss, snap); });
+    step('inventory qty', function(){ writeInventoryQty(ss, snap.inv, snap.invCfg); });
+    step('needed', function(){ writeNeeded(ss, snap.inv); });
+    step('order view', function(){ ensureOrderView(ss); });
+    saveJson('lastSync', { at: new Date().toISOString(),
+                           build: (snap.appBuild || '') + '+watchdog', errs: errs });
+  } finally { lock.releaseLock(); }
+  if (interactive) {
+    try { SpreadsheetApp.getUi().alert('Tabs rebuilt from the latest synced data.'); } catch (e2) {}
+  }
 }
 
 /* ================= hidden-tab JSON storage ================= */
@@ -373,7 +381,7 @@ function buildMenu() {
     .addItem('Phase 2 → Place order (move checked to APP ORDERS)', 'placeOrder')
     .addItem('Book received quantities into stock', 'bookReceived')
     .addSeparator()
-    .addItem('Run sheet cleanup (delete retired tabs)', 'cleanupSheet')
+    .addItem('Rebuild tabs from latest data', 'cleanupSheet')
     .addToUi();
 }
 
