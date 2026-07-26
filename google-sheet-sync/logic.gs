@@ -78,37 +78,95 @@ function txt(s) { return ContentService.createTextOutput(s); }
 
 /* ================= ONE-TIME CLEANUP (run manually once) ================= */
 function cleanupImpl() {
-  /* Watchdog: rebuild tabs from the stored snapshot when they've fallen
-     behind (runs on a time trigger); also the menu's force-rebuild. */
+  /* Resumable watchdog/rebuild: summary tabs first, then kart tabs in
+     time-budgeted chunks; a cursor lets successive runs continue. */
   var snap = loadJson('snapshot', null);
   if (!snap || !snap.karts) return;
   var interactive = false;
   try { SpreadsheetApp.getUi(); interactive = true; } catch (e) {}
-  var last = loadJson('lastSync', null);
-  var snapAt = new Date(snap.savedAt || 0).getTime();
-  var lastAt = last ? new Date(last.at || 0).getTime() : 0;
-  var lastHadErrors = last && last.errs && last.errs.length > 0;
-  if (!interactive && lastAt >= snapAt && !lastHadErrors) return; // all current
+  var cur = loadJson('wd_cursor', null);
+  if (!interactive && !cur) {
+    var last = loadJson('lastSync', null);
+    var snapAt = new Date(snap.savedAt || 0).getTime();
+    var lastAt = last ? new Date(last.at || 0).getTime() : 0;
+    var lastHadErrors = last && last.errs && last.errs.length > 0;
+    if (lastAt >= snapAt && !lastHadErrors) return; // everything current
+  }
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) return;
+  if (!lock.tryLock(20000)) return;
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var deadline = Date.now() + 210 * 1000; // ~3.5 min budget per run
     var photoIndex = loadJson('photo_index', {});
-    var errs = [];
+    var errs = (cur && cur.errs) || [];
     function step(name, fn){ try { fn(); } catch (err2) { errs.push(name + ': ' + err2); } }
-    step('all dates', function(){ writeAllDates(ss, snap); });
-    step('log', function(){ writeLog(ss, snap, photoIndex); });
-    step('parts used', function(){ writePartsUsed(ss, snap); });
-    step('kart tabs', function(){ writeKartTabs(ss, snap); });
-    step('inventory qty', function(){ writeInventoryQty(ss, snap.inv, snap.invCfg); });
-    step('needed', function(){ writeNeeded(ss, snap.inv); });
-    step('order view', function(){ ensureOrderView(ss); });
-    saveJson('lastSync', { at: new Date().toISOString(),
-                           build: (snap.appBuild || '') + '+watchdog', errs: errs });
+    var phase = cur ? cur.phase : 0;
+    var kartPos = cur ? (cur.k || 0) : 0;
+    if (phase === 0) {
+      step('all dates', function(){ writeAllDates(ss, snap); });
+      step('log', function(){ writeLog(ss, snap, photoIndex); });
+      step('parts used', function(){ writePartsUsed(ss, snap); });
+      step('inventory qty', function(){ writeInventoryQty(ss, snap.inv, snap.invCfg); });
+      step('needed', function(){ writeNeeded(ss, snap.inv); });
+      step('order view', function(){ ensureOrderView(ss); });
+      phase = 1; kartPos = 0;
+    }
+    var doneAll = false;
+    if (phase === 1) {
+      var next = writeKartTabsChunk(ss, snap, kartPos, deadline, errs);
+      if (next < 0) doneAll = true; else kartPos = next;
+    }
+    if (doneAll) {
+      saveJson('wd_cursor', null);
+      saveJson('lastSync', { at: new Date().toISOString(),
+                             build: (snap.appBuild || '') + '+watchdog', errs: errs });
+    } else {
+      saveJson('wd_cursor', { phase: 1, k: kartPos, errs: errs });
+    }
+    if (interactive) {
+      try {
+        SpreadsheetApp.getUi().alert(doneAll
+          ? 'Tabs rebuilt from the latest synced data.'
+          : 'Summary tabs done, kart tabs partly done — the rest finishes automatically in the background over the next few 10-minute cycles. No need to run this again.');
+      } catch (e2) {}
+    }
   } finally { lock.releaseLock(); }
-  if (interactive) {
-    try { SpreadsheetApp.getUi().alert('Tabs rebuilt from the latest synced data.'); } catch (e2) {}
+}
+function writeKartTabsChunk(ss, data, startIdx, deadline, errs) {
+  var sigs = loadJson('kart_sigs', {});
+  var ks = kartOrder(data.karts);
+  var wrote = false;
+  for (var i = startIdx; i < ks.length; i++) {
+    if (Date.now() > deadline) { if (wrote) saveJson('kart_sigs', sigs); return i; }
+    var k = ks[i];
+    try {
+      var kd = data.karts[k], st = kd.status || {};
+      var sig = kartSig(JSON.stringify(kd));
+      if (sigs[k] === sig) continue;
+      var sh = ss.getSheetByName(k);
+      if (!sh) sh = ss.insertSheet(k);
+      var rows = [KART_HDR.slice()];
+      rows.push(['', '', '', '', kd.knotes || '', st.chain || '', st.diff || '', st.brake || '',
+                 st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '', st.weld || 0]);
+      var es = (kd.entries || []).slice().sort(function (a, b) {
+        return (new Date(a.date) - new Date(b.date)) || 0;
+      });
+      for (var j = 0; j < es.length; j++) {
+        var en = es[j];
+        rows.push([en.date || '', en.action || '', en.parts || '', en.mechanic || '',
+                   en.notes || '', '', '', '', '', '', '', '', '']);
+      }
+      sh.clearContents();
+      sh.getRange('C:C').setNumberFormat('@');
+      sh.getRange('I:L').setNumberFormat('@');
+      sh.getRange(1, 1, rows.length, KART_HDR.length).setValues(rows);
+      sh.getRange(1, 1, 1, KART_HDR.length).setFontWeight('bold');
+      sigs[k] = sig;
+      wrote = true;
+    } catch (e3) { errs.push('kart ' + k + ': ' + e3); }
   }
+  if (wrote) saveJson('kart_sigs', sigs);
+  return -1;
 }
 
 /* ================= hidden-tab JSON storage ================= */
