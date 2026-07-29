@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v6-freshsheet';
+var LOGIC_VER = 'v6.1-redraw';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -73,6 +73,28 @@ function handleGet(e) {
                                     last: loadJson('lastSync', null) });
     return ContentService.createTextOutput(cb + '(' + payload2 + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  if (e && e.parameter && e.parameter.mode === 'redraw') {
+    /* Rebuild tabs straight from the stored snapshot — no data round-trip,
+       so nothing can be lost. ?only=log rebuilds a single tab quickly. */
+    var snap3 = loadJson('snapshot', null);
+    if (!snap3 || !snap3.karts) return txt('no snapshot stored');
+    var ss3 = SpreadsheetApp.getActiveSpreadsheet();
+    var pi3 = loadJson('photo_index', {});
+    var only = String((e.parameter.only || '')).toLowerCase();
+    var errs3 = [];
+    var step3 = function (name, fn) {
+      if (only && only !== name) return;
+      try { fn(); } catch (err3) { errs3.push(name + ': ' + err3); }
+    };
+    step3('log', function () { writeLog(ss3, snap3, pi3); });
+    step3('alldates', function () { writeAllDates(ss3, snap3); });
+    step3('partsused', function () { writePartsUsed(ss3, snap3); });
+    step3('karttabs', function () { writeKartTabs(ss3, snap3); });
+    step3('needed', function () { writeNeeded(ss3, snap3.inv); });
+    step3('orderview', function () { ensureOrderView(ss3); });
+    return txt('redraw ' + (only || 'all') + ' [' + LOGIC_VER + ']: ' +
+               (errs3.length ? 'ERRORS ' + errs3.join(' | ') : 'ok'));
   }
   if (e && e.parameter && e.parameter.mode === 'bust') {
     /* drop the cached copy of this file so the very next call re-fetches
