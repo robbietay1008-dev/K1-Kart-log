@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v6.1-redraw';
+var LOGIC_VER = 'v6.2-diag';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -95,6 +95,32 @@ function handleGet(e) {
     step3('orderview', function () { ensureOrderView(ss3); });
     return txt('redraw ' + (only || 'all') + ' [' + LOGIC_VER + ']: ' +
                (errs3.length ? 'ERRORS ' + errs3.join(' | ') : 'ok'));
+  }
+  if (e && e.parameter && e.parameter.mode === 'diag') {
+    /* Report exactly which sheet operation a tab refuses. Read-only except
+       for the optional destructive steps, which must be asked for by name. */
+    var ssd = SpreadsheetApp.getActiveSpreadsheet();
+    var out = [];
+    var all = ssd.getSheets(), names = [];
+    for (var n = 0; n < all.length; n++) names.push(all[n].getName());
+    out.push('tabs(' + all.length + '): ' + names.join(','));
+    var tname = e.parameter.tab || 'APP LOG';
+    var t = ssd.getSheetByName(tname);
+    if (!t) { out.push(tname + ': MISSING'); return txt(out.join('\n')); }
+    out.push(tname + ': index=' + t.getIndex() + ' lastRow=' + t.getLastRow() +
+             ' lastCol=' + t.getLastColumn() + ' maxRow=' + t.getMaxRows());
+    var probe = function (label, fn) {
+      try { var r = fn(); out.push(label + ': ok' + (r === undefined ? '' : ' -> ' + r)); }
+      catch (ep) { out.push(label + ': FAIL ' + ep); }
+    };
+    probe('clearContents', function () { t.clearContents(); });
+    probe('setNumberFormat D', function () { t.getRange('D:D').setNumberFormat('@'); });
+    probe('setValues A1', function () { t.getRange(1, 1, 1, 2).setValues([['DATE', 'KART']]); });
+    if (e.parameter.drop === 'yes') {
+      probe('deleteSheet', function () { ssd.deleteSheet(t); });
+      probe('recreate', function () { ssd.insertSheet(tname, 1); return 'made'; });
+    }
+    return txt(out.join('\n'));
   }
   if (e && e.parameter && e.parameter.mode === 'bust') {
     /* drop the cached copy of this file so the very next call re-fetches
