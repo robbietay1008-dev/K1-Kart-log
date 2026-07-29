@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v6.2-diag';
+var LOGIC_VER = 'v7-flush';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -29,7 +29,7 @@ function handlePost(e) {
                                invCfg: data.invCfg || {}, parts: data.parts || [] });
         var photoIndex = loadJson('photo_index', {});
         var errs = [];
-        function step(name, fn){ try { fn(); } catch (err2) { errs.push(name + ': ' + err2); } }
+        function step(name, fn){ try { fn(); SpreadsheetApp.flush(); } catch (err2) { errs.push(name + ': ' + err2); } }
         step('all dates', function(){ writeAllDates(ss, data); });
         step('log', function(){ writeLog(ss, data, photoIndex); });
         step('parts used', function(){ writePartsUsed(ss, data); });
@@ -85,7 +85,7 @@ function handleGet(e) {
     var errs3 = [];
     var step3 = function (name, fn) {
       if (only && only !== name) return;
-      try { fn(); } catch (err3) { errs3.push(name + ': ' + err3); }
+      try { fn(); SpreadsheetApp.flush(); } catch (err3) { errs3.push(name + ': ' + err3); }
     };
     step3('log', function () { writeLog(ss3, snap3, pi3); });
     step3('alldates', function () { writeAllDates(ss3, snap3); });
@@ -110,7 +110,7 @@ function handleGet(e) {
     out.push(tname + ': index=' + t.getIndex() + ' lastRow=' + t.getLastRow() +
              ' lastCol=' + t.getLastColumn() + ' maxRow=' + t.getMaxRows());
     var probe = function (label, fn) {
-      try { var r = fn(); out.push(label + ': ok' + (r === undefined ? '' : ' -> ' + r)); }
+      try { var r = fn(); SpreadsheetApp.flush(); out.push(label + ': ok' + (r === undefined ? '' : ' -> ' + r)); }
       catch (ep) { out.push(label + ': FAIL ' + ep); }
     };
     probe('clearContents', function () { t.clearContents(); });
@@ -156,7 +156,7 @@ function cleanupImpl() {
     var deadline = Date.now() + 210 * 1000; // ~3.5 min budget per run
     var photoIndex = loadJson('photo_index', {});
     var errs = (cur && cur.errs) || [];
-    function step(name, fn){ try { fn(); } catch (err2) { errs.push(name + ': ' + err2); } }
+    function step(name, fn){ try { fn(); SpreadsheetApp.flush(); } catch (err2) { errs.push(name + ': ' + err2); } }
     var phase = cur ? cur.phase : 0;
     var kartPos = cur ? (cur.k || 0) : 0;
     if (phase === 0) {
@@ -336,14 +336,23 @@ function batColor(s) {
 }
 
 /* ================= sheet writers ================= */
+/* Apps Script batches spreadsheet writes and flushes them AFTER the calling
+   function returns — so a rejected write throws outside any try/catch here
+   unless we force the flush ourselves. Everything guarded below must flush. */
+function tryOp(fn) {
+  try { fn(); SpreadsheetApp.flush(); return ''; }
+  catch (e) { return String(e) || 'failed'; }
+}
+
 /* Best-effort text formatting. Returns false if any column refused
    (a Sheets "table" makes typed columns un-formattable). Never throws. */
 function fmtTextCols(sh, cols) {
   if (!cols) return true;
   var ok = true;
   for (var i = 0; i < cols.length; i++) {
-    try { sh.getRange(cols[i] + ':' + cols[i]).setNumberFormat('@'); }
-    catch (e) { ok = false; }
+    var col = cols[i];
+    var err = tryOp(function () { sh.getRange(col + ':' + col).setNumberFormat('@'); });
+    if (err) ok = false;
   }
   return ok;
 }
@@ -352,8 +361,7 @@ function freshSheet(ss, name, textCols) {
   var sh = ss.getSheetByName(name);
   if (!sh) { sh = ss.insertSheet(name); fmtTextCols(sh, textCols); return sh; }
 
-  var cleared = false;
-  try { sh.clearContents(); cleared = true; } catch (e0) { cleared = false; }
+  var cleared = !tryOp(function () { sh.clearContents(); });
   if (cleared && fmtTextCols(sh, textCols)) return sh;
 
   /* The tab is a Sheets "table" (or otherwise unwritable): stand up a clean
@@ -363,18 +371,17 @@ function freshSheet(ss, name, textCols) {
   var pos = 1;
   try { pos = sh.getIndex(); } catch (e1) { pos = 1; }
   var junk = name + ' OLD';
-  try {
+  tryOp(function () {
     var prior = ss.getSheetByName(junk);
     if (prior) ss.deleteSheet(prior);
-  } catch (e2) {}
-  var renamed = false;
-  try { sh.setName(junk); renamed = true; } catch (e3) { renamed = false; }
-  if (!renamed) return sh;   /* can't free the name — write into it anyway */
+  });
+  if (tryOp(function () { sh.setName(junk); })) return sh;  /* name not freed */
 
-  var nsh;
-  try { nsh = ss.insertSheet(name, pos - 1); }
-  catch (e4) { nsh = ss.insertSheet(name); }
-  try { ss.deleteSheet(ss.getSheetByName(junk)); } catch (e5) {}
+  var nsh = null;
+  if (tryOp(function () { nsh = ss.insertSheet(name, pos - 1); }))
+    tryOp(function () { nsh = ss.insertSheet(name); });
+  if (!nsh) { tryOp(function () { sh.setName(name); }); return sh; }
+  tryOp(function () { ss.deleteSheet(ss.getSheetByName(junk)); });
   fmtTextCols(nsh, textCols);
   return nsh;
 }
