@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v7.2';
+var LOGIC_VER = 'v8.0';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -26,7 +26,9 @@ function handlePost(e) {
                                quicks: data.quicks || [], inv: data.inv || {},
                                tomb: data.tomb || {}, stamps: data.stamps || {},
                                invTouched: data.invTouched || {}, rc: data.rc || {},
-                               invCfg: data.invCfg || {}, parts: data.parts || [] });
+                               invCfg: data.invCfg || {}, parts: data.parts || [],
+                               cfgTouched: data.cfgTouched || {},
+                               partTomb: data.partTomb || {}, rekeys: data.rekeys || [] });
         var photoIndex = loadJson('photo_index', {});
         var errs = [];
         function step(name, fn){ try { fn(); SpreadsheetApp.flush(); } catch (err2) { errs.push(name + ': ' + err2); } }
@@ -34,6 +36,7 @@ function handlePost(e) {
         step('log', function(){ writeLog(ss, data, photoIndex); });
         step('parts used', function(){ writePartsUsed(ss, data); });
         step('kart tabs', function(){ writeKartTabs(ss, data); });
+        step('part config', function(){ mergeCfg(ss, data); });
         step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg); });
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
@@ -60,14 +63,29 @@ function handleGet(e) {
                                    stamps: snap ? (snap.stamps || {}) : {},
                                    invTouched: snap ? (snap.invTouched || {}) : {},
                                    rc: snap ? (snap.rc || {}) : {},
+                                   invCfg: snap ? (snap.invCfg || {}) : {},
+                                   cfgTouched: snap ? (snap.cfgTouched || {}) : {},
+                                   partTomb: snap ? (snap.partTomb || {}) : {},
+                                   rekeys: snap ? (snap.rekeys || []) : [],
                                    photos: photoIndex });
     return ContentService.createTextOutput(cb + '(' + payload + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
   if (e && e.parameter && e.parameter.mode === 'inv') {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    /* Reconcile whatever was typed on the inventory tab against the last data
+       the app sent us, so the answer already accounts for both sides. If
+       another device is mid-merge, answer without config rather than guess. */
+    var res2 = { names: null, del: null, at: 0 };
+    var lk2 = LockService.getScriptLock();
+    if (lk2.tryLock(15000)) {
+      try { res2 = mergeCfg(ss, loadJson('snapshot', null)); }
+      catch (em) { res2 = { names: invConfigFromSheet(ss), del: null, at: 0, err: String(em) }; }
+      finally { lk2.releaseLock(); }
+    }
     var payload2 = JSON.stringify({ ok: true, ver: LOGIC_VER,
-                                    names: invConfigFromSheet(ss),
+                                    names: res2.names, del: res2.del, cfgAt: res2.at,
+                                    cfgErr: res2.err || '',
                                     receipts: loadJson('receipts', []),
                                     have: Object.keys(loadJson('photo_index', {})),
                                     last: loadJson('lastSync', null) });
@@ -581,39 +599,207 @@ function invConfigFromSheet(ss) {
   return out;
 }
 
-/* ---- write app quantities back into the inventory tab QUANTITY column ---- */
+/* ---- write app quantities back into the inventory tab QUANTITY column ----
+   Rows are added, removed and renamed by mergeCfg; this only moves numbers. */
 function writeInventoryQty(ss, inv, cfgFromApp) {
   var sh = ss.getSheetByName('inventory');
   if (!sh || !inv) return;
   var last = sh.getLastRow();
-  var found = {};
-  if (last >= 2) {
-    var nums = sh.getRange(2, 2, last - 1, 1).getValues();
-    var qtys = sh.getRange(2, 4, last - 1, 1).getValues();
-    for (var i = 0; i < nums.length; i++) {
-      var key = String(nums[i][0] || '').trim().toUpperCase();
-      if (!key) continue;
-      found[key] = true;
-      if (inv[key] !== undefined) qtys[i][0] = inv[key];
-    }
-    sh.getRange(2, 4, last - 1, 1).setValues(qtys);
+  if (last < 2) return;
+  var nums = sh.getRange(2, 2, last - 1, 1).getValues();
+  var qtys = sh.getRange(2, 4, last - 1, 1).getValues();
+  for (var i = 0; i < nums.length; i++) {
+    var key = String(nums[i][0] || '').trim().toUpperCase();
+    if (key && inv[key] !== undefined) qtys[i][0] = inv[key];
   }
-  /* the app's rule: if it's in the app, it's on the sheet — append missing rows */
-  if (cfgFromApp) {
+  sh.getRange(2, 4, last - 1, 1).setValues(qtys);
+}
+
+/* ================= v8: two-way part config =================
+   Part names, numbers and thresholds can be changed in the app or typed
+   straight onto the inventory tab. To tell which side actually moved (rather
+   than letting the last writer win), we keep a mirror of the last agreed
+   config in the hidden tab and use it as the common ancestor.
+
+   Timestamps are the app's own Date.now() stamps, never the sheet's clock, so
+   the two sides never have to agree on time — cfgTouched values from the app
+   are compared against the newest cfgTouched the mirror was built from. */
+
+/* inventory tab as a lookup: B=part C=name D=qty E=counted F=red G=green */
+function invRows(ss) {
+  var sh = ss.getSheetByName('inventory');
+  var out = { sh: sh, byNum: {} };
+  if (!sh) return out;
+  var last = sh.getLastRow();
+  if (last < 2) return out;
+  var vals = sh.getRange(2, 2, last - 1, 6).getValues();
+  for (var i = 0; i < vals.length; i++) {
+    var num = String(vals[i][0] === null ? '' : vals[i][0]).trim().toUpperCase();
+    if (!num || out.byNum[num]) continue;      /* first row wins on duplicates */
+    var nm = String(vals[i][1] || num).trim();
+    out.byNum[num] = { row: i + 2, n: nm,
+                       r: parseInt(vals[i][4], 10) || 0,
+                       g: parseInt(vals[i][5], 10) || 0,
+                       retired: /\(RETIRED\)/i.test(nm) ? 1 : 0 };
+  }
+  return out;
+}
+
+function sameCfg(a, b) {
+  return !!a && !!b && a.n === b.n && (a.r || 0) === (b.r || 0) && (a.g || 0) === (b.g || 0);
+}
+
+function mergeCfg(ss, snap) {
+  var sh = ss.getSheetByName('inventory');
+  if (!sh) return { names: {}, del: null, at: 0 };
+
+  var ours = (snap && snap.invCfg) || {};
+  var touched = (snap && snap.cfgTouched) || {};
+  var tomb = (snap && snap.partTomb) || {};
+  var rekeys = (snap && snap.rekeys) || [];
+  var inv = (snap && snap.inv) || {};
+
+  /* how current the app data in this merge is, in the app's own clock */
+  var snapAt = 0, kk;
+  for (kk in touched) if (touched[kk] > snapAt) snapAt = touched[kk];
+  for (kk in tomb) if (tomb[kk] > snapAt) snapAt = tomb[kk];
+
+  var base = loadJson('cfg_mirror', null);
+  var haveMirror = !!base;
+  if (!base) base = {};
+  var mirrorAt = base._at || 0;
+  delete base._at;
+
+  var rows = invRows(ss);
+  var theirs = rows.byNum;
+  var del = loadJson('cfg_del', {});
+  var names = {};
+  var edits = [], dropRows = [], appends = [];
+
+  /* --- 1. renames made in the app: carry the sheet row to the new number --- */
+  var rkSeen = {};
+  var rkDone = loadJson('cfg_rekeys', {});
+  for (var q = 0; q < rekeys.length; q++) {
+    var rk = rekeys[q];
+    if (!rk || !rk.from || !rk.to) continue;
+    var sig = rk.from + '>' + rk.to + '@' + (rk.at || 0);
+    rkSeen[sig] = 1;
+    if (rkDone[sig]) continue;
+    var src = theirs[rk.from];
+    if (src) {
+      if (theirs[rk.to]) dropRows.push(src.row);          /* target row already there */
+      else {
+        edits.push({ row: src.row, col: 2, v: rk.to });
+        theirs[rk.to] = { row: src.row, n: src.n, r: src.r, g: src.g, retired: src.retired };
+      }
+      delete theirs[rk.from];
+    }
+    if (base[rk.from]) {
+      if (!base[rk.to]) base[rk.to] = base[rk.from];
+      delete base[rk.from];
+    }
+    delete del[rk.from];
+  }
+  /* the app caps its rename list, so trim ours to match and stop it growing */
+  saveJson('cfg_rekeys', rkSeen);
+
+  /* --- 2. resolve every part we know about from any of the three sides --- */
+  var keys = {}, k;
+  for (k in base) keys[k] = 1;
+  for (k in theirs) keys[k] = 1;
+  for (k in ours) keys[k] = 1;
+
+  for (k in keys) {
+    var b = base[k], t = theirs[k], o = ours[k];
+
+    /* deleted in the app — pull the row and stop tracking it */
+    if (tomb[k]) {
+      if (t) dropRows.push(t.row);
+      delete base[k]; delete del[k];
+      continue;
+    }
+    /* legacy "(RETIRED)" rows: report them, never rewrite or delete them */
+    if (t && t.retired) { names[k] = { n: t.n, r: t.r, g: t.g, retired: 1 }; continue; }
+
+    if (t && !o) {                       /* typed onto the sheet, app doesn't have it */
+      names[k] = { n: t.n, r: t.r, g: t.g };
+      base[k] = { n: t.n, r: t.r, g: t.g };
+      delete del[k];
+      continue;
+    }
+    if (o && !t) {                       /* in the app, no row on the sheet */
+      if (haveMirror && b && (touched[k] || 0) <= mirrorAt) {
+        /* it had a row at the last merge and the app hasn't touched it since,
+           so the row was deleted on the sheet — hand that back to the app */
+        del[k] = mirrorAt || 1;
+        delete base[k];
+        continue;
+      }
+      appends.push(k);                   /* new in the app (or re-added after a delete) */
+      names[k] = { n: o.n, r: o.r, g: o.g };
+      base[k] = { n: o.n, r: o.r, g: o.g };
+      delete del[k];
+      continue;
+    }
+    /* on both sides: only the side that actually changed gets to win */
+    var sheetMoved = !sameCfg(b, t);
+    var appMoved = !sameCfg(b, o);
+    var win;
+    /* first run ever: there is no ancestor to compare against, so don't guess —
+       adopt the sheet as the starting point and merge properly from here on */
+    if (!haveMirror) win = t;
+    else if (appMoved && !sheetMoved) win = o;
+    else if (!appMoved) win = t;
+    else win = ((touched[k] || 0) > mirrorAt) ? o : t;   /* both moved: newer edit */
+    if (win !== t) {
+      if (win.n !== t.n) edits.push({ row: t.row, col: 3, v: win.n });
+      if ((win.r || 0) !== t.r) edits.push({ row: t.row, col: 6, v: win.r || 0 });
+      if ((win.g || 0) !== t.g) edits.push({ row: t.row, col: 7, v: win.g || 0 });
+    }
+    names[k] = { n: win.n, r: win.r, g: win.g };
+    base[k] = { n: win.n, r: win.r, g: win.g };
+    delete del[k];
+  }
+
+  /* --- 3. write it: edits before deletes, since deletes shift rows up --- */
+  var i;
+  for (i = 0; i < edits.length && i < 300; i++)
+    sh.getRange(edits[i].row, edits[i].col).setValue(edits[i].v);
+  if (dropRows.length) {
+    dropRows.sort(function (a, b2) { return b2 - a; });
+    var prev = -1;
+    for (i = 0; i < dropRows.length; i++) {
+      if (dropRows[i] === prev) continue;
+      prev = dropRows[i];
+      sh.deleteRow(dropRows[i]);
+    }
+  }
+  if (appends.length) {
     var newRows = [];
-    for (var num in inv) {
-      if (found[num]) continue;
-      if (!(inv[num] > 0)) continue;   // only parts actually holding stock
-      var c = cfgFromApp[num];
-      if (!c || /\(RETIRED\)/i.test(c.n || '')) continue;
-      newRows.push(['', num, c.n || num, inv[num], '', c.r || 0, c.g || 0]);
+    if (appends.length > 500) appends = appends.slice(0, 500);
+    for (i = 0; i < appends.length; i++) {
+      var an = appends[i], ac = ours[an];
+      var q2 = inv[an] !== undefined ? inv[an] : 0;
+      newRows.push(['', an, ac.n || an, q2, '', ac.r || 0, ac.g || 0]);
     }
-    if (newRows.length) {
-      var start = sh.getLastRow() + 1;
-      sh.getRange(start, 2, newRows.length, 1).setNumberFormat('@');
-      sh.getRange(start, 1, newRows.length, 7).setValues(newRows);
-    }
+    var start = sh.getLastRow() + 1;
+    tryOp(function () { sh.getRange(start, 2, newRows.length, 1).setNumberFormat('@'); });
+    sh.getRange(start, 1, newRows.length, 7).setValues(newRows);
   }
+  SpreadsheetApp.flush();
+
+  /* keep the handback list from growing without bound */
+  var dk = [], dn;
+  for (dn in del) dk.push(dn);
+  if (dk.length > 300) {
+    dk.sort(function (a, b2) { return (del[a] || 0) - (del[b2] || 0); });
+    for (i = 0; i < dk.length - 300; i++) delete del[dk[i]];
+  }
+  saveJson('cfg_del', del);
+  base._at = snapAt;
+  saveJson('cfg_mirror', base);
+  delete base._at;
+  return { names: names, del: del, at: snapAt };
 }
 
 /* ---- APP NEEDED: red + yellow items; preserves your checks & order qtys ---- */
@@ -649,6 +835,7 @@ function writeNeeded(ss, inv) {
     var q = (inv && inv[num] !== undefined) ? inv[num] : '';
     if (q === '') continue;
     var c = cfg[num];
+    if (!c.r && !c.g) continue;      /* no levels set = not something we track */
     var status = q <= c.r ? 'NEEDED' : (q < c.g ? 'WANTED' : '');
     if (!status) continue;
     var keep = kept[num] || { chk: false, qty: '' };
