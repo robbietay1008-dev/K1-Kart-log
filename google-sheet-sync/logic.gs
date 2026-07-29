@@ -745,9 +745,12 @@ function mergeCfg(ss, snap) {
     var sheetMoved = !sameCfg(b, t);
     var appMoved = !sameCfg(b, o);
     var win;
-    /* first run ever: there is no ancestor to compare against, so don't guess —
-       adopt the sheet as the starting point and merge properly from here on */
-    if (!haveMirror) win = t;
+    /* First run ever: there is no ancestor to compare against, so don't guess —
+       adopt the sheet as the starting point and merge properly from here on.
+       The exception is a part the app has explicitly stamped: cfgTouched only
+       exists from v8.0 on, so a stamp here is an edit made in the app that the
+       sheet has never seen, and dropping it would undo the user's typing. */
+    if (!haveMirror) win = touched[k] ? o : t;
     else if (appMoved && !sheetMoved) win = o;
     else if (!appMoved) win = t;
     else win = ((touched[k] || 0) > mirrorAt) ? o : t;   /* both moved: newer edit */

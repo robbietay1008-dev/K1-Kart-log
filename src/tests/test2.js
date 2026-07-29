@@ -16,8 +16,10 @@ const { execSync } = require('child_process');
   await page.goto('file:///home/claude/kartlog/kart_log.html');
   await page.waitForTimeout(600);
 
-  // no tire UI anywhere
-  const tireMention = await page.evaluate(() => document.body.innerHTML.indexOf('TIRES') > -1);
+  // no tire-checking UI anywhere (the words "REAR TIRES" still appear inside
+  // seeded log history, so look for the controls, not the text)
+  const tireMention = await page.evaluate(() =>
+    !!document.getElementById('tireRow') || document.querySelectorAll('.tirebtn').length > 0);
   console.log('tire UI present (should be false):', tireMention);
 
   // open kart 3
@@ -56,7 +58,12 @@ const { execSync } = require('child_process');
 
   // photo size check (compressed?)
   const size = await page.evaluate(() => new Promise(res => {
-    photoGet(JSON.parse(localStorage.getItem('k1kartlog_v1')).karts['3'].entries.slice(-1)[0].photos[0],
+    /* the grid shifted when karts 1, 35 and 36 were retired, so find the
+       photo wherever it landed rather than assuming a kart number */
+    var ks = JSON.parse(localStorage.getItem('k1kartlog_v1')).karts, pid = null;
+    for (var k in ks) for (var i = 0; i < ks[k].entries.length; i++)
+      if (ks[k].entries[i].photos && ks[k].entries[i].photos.length) pid = ks[k].entries[i].photos[0];
+    photoGet(pid,
       d => res(d ? d.length : -1));
   }));
   console.log('stored photo dataURL chars (should be ~100-300k, orig 2400px):', size);
@@ -69,25 +76,7 @@ const { execSync } = require('child_process');
   await page.screenshot({ path: 'shot_viewer.png' });
   await page.click('#pvClose');
 
-  // export headers have no tires, notes has photo marker
-  const row = await page.evaluate(() => {
-    const wb = buildWorkbook();
-    const ws = wb.Sheets['3'];
-    const hdr = [];
-    for (let c = 0; c < 20; c++) {
-      const cell = ws[XLSX.utils.encode_cell({r:0,c:c})];
-      if (cell) hdr.push(cell.v);
-    }
-    // find the weld row entry
-    let marker = null;
-    for (let r = 2; r < 15; r++) {
-      const cell = ws[XLSX.utils.encode_cell({r:r,c:4})];
-      if (cell && String(cell.v).indexOf('photo') > -1) marker = cell.v;
-    }
-    return { hdr, marker };
-  });
-  console.log('export headers:', row.hdr.join(' | '));
-  console.log('photo marker in notes col:', row.marker);
+  // (Excel export was removed from the app on request — block dropped)
 
   console.log('ERRORS:', errors.length ? errors : 'none');
   await browser.close();

@@ -229,7 +229,10 @@
     <div class="chiprow" id="invFilterRow" style="margin-top:8px"></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px">
       <span id="invProgress" style="color:#9aa3b5; font-weight:700; font-size:14px"></span>
-      <button class="hbtn" id="btnInvReset" style="min-height:42px; padding:8px 14px; font-size:14px">RESET COUNTS</button>
+      <span style="display:flex; gap:8px">
+        <button class="hbtn" id="btnInvAdd" style="min-height:42px; padding:8px 14px; font-size:14px">+ PART</button>
+        <button class="hbtn" id="btnInvReset" style="min-height:42px; padding:8px 14px; font-size:14px">RESET COUNTS</button>
+      </span>
     </div>
   </div>
   <div class="kd" id="invList"></div>
@@ -246,9 +249,62 @@
       <button class="invqbtn" id="invPlus">+</button>
     </div>
     <p style="color:#9aa3b5; font-size:13px; margin-top:10px; text-align:center" id="invThresh"></p>
+    <div style="text-align:center; margin-top:8px">
+      <button class="hbtn" id="btnInvEdit" style="min-height:40px; padding:8px 16px; font-size:14px">EDIT DETAILS</button>
+    </div>
+    <div id="invEditWrap" style="display:none; margin-top:12px; border-top:1px solid #2a3142; padding-top:12px">
+      <label class="f">PART NAME</label>
+      <input type="text" class="in" id="invEName">
+      <label class="f" style="margin-top:10px">PART NUMBER</label>
+      <input type="text" class="in" id="invENum" autocapitalize="characters">
+      <p style="color:#8a7; font-size:12px; margin:6px 0 0">Changing the number renames it everywhere — past log entries and the sheet too.</p>
+      <div style="display:flex; gap:10px; margin-top:10px">
+        <span style="flex:1">
+          <label class="f">RED AT OR BELOW</label>
+          <input type="number" class="in" id="invERed" inputmode="numeric">
+        </span>
+        <span style="flex:1">
+          <label class="f">GREEN AT OR ABOVE</label>
+          <input type="number" class="in" id="invEGreen" inputmode="numeric">
+        </span>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:14px">
+        <button class="hbtn" id="btnInvDelete" style="flex:1; color:#ff8a80; border-color:#7a2a2a">DELETE PART</button>
+        <button class="hbtn red" id="btnInvEditSave" style="flex:1">SAVE DETAILS</button>
+      </div>
+    </div>
     <div class="mactions">
       <button class="hbtn" id="btnInvCancel">Cancel</button>
       <button class="hbtn red" id="btnInvSave">SET COUNT</button>
+    </div>
+  </div>
+</div>
+
+<!-- add a part that isn't in the catalog yet -->
+<div class="modal" id="invAddModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle">NEW PART</div>
+    <label class="f">PART NUMBER</label>
+    <input type="text" class="in" id="naNum" autocapitalize="characters">
+    <label class="f" style="margin-top:10px">PART NAME</label>
+    <input type="text" class="in" id="naName">
+    <div style="display:flex; gap:10px; margin-top:10px">
+      <span style="flex:1">
+        <label class="f">ON HAND</label>
+        <input type="number" class="in" id="naQty" inputmode="numeric" value="0">
+      </span>
+      <span style="flex:1">
+        <label class="f">RED ≤</label>
+        <input type="number" class="in" id="naRed" inputmode="numeric" value="0">
+      </span>
+      <span style="flex:1">
+        <label class="f">GREEN ≥</label>
+        <input type="number" class="in" id="naGreen" inputmode="numeric" value="0">
+      </span>
+    </div>
+    <div class="mactions">
+      <button class="hbtn" id="btnNaCancel">Cancel</button>
+      <button class="hbtn red" id="btnNaSave">ADD PART</button>
     </div>
   </div>
 </div>
@@ -474,7 +530,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0725-1503";
+var APP_BUILD = "0729-2231";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -598,6 +654,11 @@ function load(){
   if (!DB.stamps) DB.stamps = { karts:{}, quicks:0 };
   if (!DB.stamps.karts) DB.stamps.karts = {};
   if (!DB.invTouched) DB.invTouched = {};
+  /* two-way part editing: when this device last edited a part's name/thresholds,
+     which parts it deleted, and renames to replay elsewhere */
+  if (!DB.cfgTouched) DB.cfgTouched = {};
+  if (!DB.partTomb) DB.partTomb = {};
+  if (!DB.rekeys) DB.rekeys = [];
   /* deterministic ids for pre-merge entries (same seed => same ids on every device) */
   var allids = ADULT_KARTS.concat(JR_KARTS);
   for (var ii=0; ii<allids.length; ii++){
@@ -638,6 +699,7 @@ function load(){
   save();
 }
 function save(){
+  epBust();   /* the pickable parts catalog is derived from invCfg/partTomb */
   try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); }
   catch(e){ toast("SAVE FAILED — storage full?"); }
   scheduleSync();
@@ -669,6 +731,7 @@ function buildSnapshot(){
   return { type:"snapshot", app:"k1kartlog", appBuild: APP_BUILD, karts: karts,
            shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv, invCfg: DB.invCfg,
            tomb: DB.tomb, stamps: DB.stamps, invTouched: DB.invTouched,
+           cfgTouched: DB.cfgTouched, partTomb: DB.partTomb, rekeys: DB.rekeys,
            rc: DB.meta.rcApplied, parts: PARTS };
 }
 var pullSeq = 0;
@@ -744,9 +807,58 @@ function mergeRemote(r){
   if (r.quicks && r.quicks.length && rq > (DB.stamps.quicks || 0)){
     DB.quicks = r.quicks; DB.stamps.quicks = rq; changed = true;
   }
+  /* ---- part identity: renames first, then deletions, then names/thresholds ---- */
+  var rrk = r.rekeys || [];
+  if (rrk.length){
+    var mine = {}, q;
+    for (q=0;q<DB.rekeys.length;q++)
+      mine[DB.rekeys[q].from + ">" + DB.rekeys[q].to + "@" + DB.rekeys[q].at] = 1;
+    var todo = [];
+    for (q=0;q<rrk.length;q++){
+      var sig = rrk[q].from + ">" + rrk[q].to + "@" + rrk[q].at;
+      if (!mine[sig] && rrk[q].from && rrk[q].to) todo.push(rrk[q]);
+    }
+    todo.sort(function(a,b){ return (a.at||0) - (b.at||0); });   /* chained renames in order */
+    for (q=0;q<todo.length;q++){
+      rekeyPart(todo[q].from, todo[q].to, todo[q].at || Date.now());
+      DB.rekeys.push({ from: todo[q].from, to: todo[q].to, at: todo[q].at || 0 });
+      changed = true;
+    }
+    if (DB.rekeys.length > 100) DB.rekeys = DB.rekeys.slice(DB.rekeys.length - 100);
+  }
+  var rpt = r.partTomb || {};
+  for (var dnum in rpt){
+    if (DB.partTomb[dnum]) continue;
+    /* an edit here after the delete elsewhere means we want the part back */
+    if ((DB.cfgTouched[dnum] || 0) > rpt[dnum]) continue;
+    DB.partTomb[dnum] = rpt[dnum];
+    delete DB.invCfg[dnum]; delete DB.inv[dnum];
+    delete DB.invTouched[dnum]; delete DB.invCounted[dnum]; delete DB.cfgTouched[dnum];
+    changed = true;
+  }
+  var rct = r.cfgTouched || {}, rcfg = r.invCfg || {};
+  for (var cnum in rct){
+    if (DB.partTomb[cnum] || !rcfg[cnum]) continue;
+    /* Only a strictly newer edit of our own outranks theirs. Equal stamps mean
+       the record started on their side — a rename we just replayed above stamps
+       both devices the same, and their copy is the one with the new name. */
+    if (rct[cnum] < (DB.cfgTouched[cnum] || 0)) continue;
+    var rc2 = rcfg[cnum], lc2 = DB.invCfg[cnum];
+    if (!lc2){
+      DB.invCfg[cnum] = { n: rc2.n, r: rc2.r, g: rc2.g };
+      if (rc2.t !== undefined) DB.invCfg[cnum].t = rc2.t;
+      changed = true;
+    } else if (lc2.n !== rc2.n || lc2.r !== rc2.r || lc2.g !== rc2.g){
+      lc2.n = rc2.n; lc2.r = rc2.r; lc2.g = rc2.g;
+      if (rc2.t !== undefined) lc2.t = rc2.t;
+      changed = true;
+    }
+    DB.cfgTouched[cnum] = rct[cnum];
+  }
   /* inventory per part, newest touch wins */
   var rit = r.invTouched || {}, rin = r.inv || {};
   for (var num in rit){
+    if (DB.partTomb[num]) continue;
     if (rin[num] !== undefined && rit[num] > (DB.invTouched[num] || 0)){
       DB.inv[num] = rin[num]; DB.invTouched[num] = rit[num]; changed = true;
     }
@@ -805,6 +917,7 @@ function updateSyncStatus(){
   el.textContent = DB.meta.lastSync ? ("Linked. Last sent: " + DB.meta.lastSync) : "Linked. Nothing sent yet.";
 }
 function saveQuiet(){
+  epBust();
   try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); } catch(e){}
 }
 /* ---- photo upload to Drive (via the sheet receiver) ---- */
@@ -1185,14 +1298,31 @@ function pname(p){
   var c = DB.invCfg[p[0].toUpperCase()];
   return (c && c.n) ? c.n : p[1];
 }
-var PART_INDEX = null; /* num -> PARTS row, built lazily */
-function partRow(num){
-  if (!PART_INDEX){
-    PART_INDEX = {};
-    for (var i=0;i<PARTS.length;i++) PART_INDEX[PARTS[i][0].toUpperCase()] = PARTS[i];
+/* The catalog you can actually pick from: the baked parts list, plus anything
+   added or renumbered in the app or on the sheet, minus anything deleted.
+   Rebuilt on demand — call epBust() after touching invCfg or partTomb. */
+var EP_LIST = null, EP_INDEX = null;
+function epBust(){ EP_LIST = null; EP_INDEX = null; }
+function epList(){
+  if (EP_LIST) return EP_LIST;
+  var out = [], seen = {}, i;
+  for (i=0;i<PARTS.length;i++){
+    var key = PARTS[i][0].toUpperCase();
+    if (DB.partTomb[key]) continue;
+    seen[key] = 1;
+    var c = DB.invCfg[key];
+    out.push([PARTS[i][0], (c && c.n) ? c.n : PARTS[i][1], PARTS[i][2], PARTS[i][3]]);
   }
-  return PART_INDEX[String(num).toUpperCase()] || null;
+  for (var num in DB.invCfg){
+    if (seen[num] || DB.partTomb[num]) continue;
+    var c2 = DB.invCfg[num];
+    out.push([num, c2.n || num, "", (c2.t === undefined ? -1 : c2.t)]);
+  }
+  EP_LIST = out; EP_INDEX = {};
+  for (i=0;i<out.length;i++) EP_INDEX[out[i][0].toUpperCase()] = out[i];
+  return out;
 }
+function partRow(num){ epList(); return EP_INDEX[String(num).toUpperCase()] || null; }
 
 /* background: absorb other devices' work every couple of minutes */
 setInterval(function(){
@@ -1273,7 +1403,178 @@ function openInvModal(num){
     ? '<img src="'+THUMBS[p[3]]+'" style="width:120px;height:120px;object-fit:cover;border-radius:12px">' : '';
   $("invQty").value = DB.inv[num] !== undefined ? DB.inv[num] : 0;
   $("invThresh").textContent = c ? ("Red at " + c.r + " or less — green at " + c.g + " or more") : "";
+  $("invEName").value = c ? (c.n || "") : "";
+  $("invENum").value = num;
+  $("invERed").value = c ? (c.r || 0) : 0;
+  $("invEGreen").value = c ? (c.g || 0) : 0;
+  $("invEditWrap").style.display = "none";
+  $("btnInvEdit").textContent = "EDIT DETAILS";
   $("invModal").className = "modal open";
+}
+
+/* ---- how often a part shows up in logged work, so a delete can warn ---- */
+function partUsageCount(num){
+  var key = String(num).toUpperCase(), hits = 0;
+  var all = ADULT_KARTS.concat(JR_KARTS);
+  function scan(str){
+    var items = parsePartsString(str);
+    for (var i=0;i<items.length;i++)
+      if (items[i].num.toUpperCase() === key) return true;
+    return false;
+  }
+  for (var a=0;a<all.length;a++){
+    var es = DB.karts[all[a]].entries;
+    for (var e=0;e<es.length;e++) if (es[e].parts && scan(es[e].parts)) hits++;
+  }
+  for (var s=0;s<DB.shop.length;s++) if (DB.shop[s].parts && scan(DB.shop[s].parts)) hits++;
+  return hits;
+}
+
+/* Rewrite one part number into another everywhere it appears: the parts string
+   on every logged entry, stock, config, counts and the thumbnail pointer. The
+   sheet's tabs are all derived from these, so they follow on the next sync. */
+function rekeyPart(from, to, stamp){
+  from = String(from).toUpperCase(); to = String(to).toUpperCase();
+  if (!from || !to || from === to) return false;
+  var swap = function(str){
+    var items = parsePartsString(str), out = [], touched = false;
+    for (var i=0;i<items.length;i++){
+      var n = items[i].num;
+      if (n.toUpperCase() === from){ n = to; touched = true; }
+      out.push(items[i].qty > 1 ? (n + " x" + items[i].qty) : n);
+    }
+    return touched ? out.join(", ") : null;
+  };
+  var all = ADULT_KARTS.concat(JR_KARTS), a, e, s;
+  for (a=0;a<all.length;a++){
+    var es = DB.karts[all[a]].entries;
+    for (e=0;e<es.length;e++){
+      if (!es[e].parts) continue;
+      var ns = swap(es[e].parts);
+      if (ns !== null) es[e].parts = ns;
+    }
+  }
+  for (s=0;s<DB.shop.length;s++){
+    if (!DB.shop[s].parts) continue;
+    var ns2 = swap(DB.shop[s].parts);
+    if (ns2 !== null) DB.shop[s].parts = ns2;
+  }
+  /* carry the part's own record across, keeping whichever thumbnail it had */
+  var oldCfg = DB.invCfg[from];
+  if (oldCfg){
+    var pr = partRow(from);
+    var cfg = { n: oldCfg.n, r: oldCfg.r, g: oldCfg.g };
+    if (oldCfg.t !== undefined) cfg.t = oldCfg.t;
+    else if (pr && pr[3] >= 0) cfg.t = pr[3];
+    if (!DB.invCfg[to]) DB.invCfg[to] = cfg;
+    delete DB.invCfg[from];
+  }
+  if (DB.inv[from] !== undefined){
+    if (DB.inv[to] === undefined) DB.inv[to] = DB.inv[from];
+    else DB.inv[to] += DB.inv[from];
+    delete DB.inv[from];
+  }
+  if (DB.invCounted[from]){ DB.invCounted[to] = 1; delete DB.invCounted[from]; }
+  delete DB.invTouched[from];
+  delete DB.cfgTouched[from];
+  DB.invTouched[to] = stamp;
+  DB.cfgTouched[to] = stamp;
+  /* the old number must not come back from the sheet or another device */
+  DB.partTomb[from] = stamp;
+  delete DB.partTomb[to];
+  epBust();
+  return true;
+}
+
+function recordRekey(from, to, stamp){
+  DB.rekeys.push({ from: String(from).toUpperCase(), to: String(to).toUpperCase(), at: stamp });
+  if (DB.rekeys.length > 100) DB.rekeys = DB.rekeys.slice(DB.rekeys.length - 100);
+}
+
+function saveInvEdit(){
+  var num = invModalNum;
+  if (!num) return;
+  var name = $("invEName").value.trim();
+  var newNum = $("invENum").value.trim().toUpperCase();
+  var red = parseInt($("invERed").value, 10); if (isNaN(red) || red < 0) red = 0;
+  var green = parseInt($("invEGreen").value, 10); if (isNaN(green) || green < 0) green = 0;
+  if (!name){ toast("Name can't be blank", true); return; }
+  if (!newNum){ toast("Part number can't be blank", true); return; }
+  var stamp = Date.now();
+  if (newNum !== num){
+    if (DB.invCfg[newNum] && !DB.partTomb[newNum]){
+      if (!confirm(newNum + " already exists (" + DB.invCfg[newNum].n +
+                   ").\n\nMerge " + num + " into it? Stock adds together and past entries all point at " + newNum + "."))
+        return;
+    } else {
+      var used = partUsageCount(num);
+      if (!confirm("Rename " + num + " to " + newNum + "?\n\n" +
+                   (used ? used + " past log " + (used === 1 ? "entry" : "entries") + " will be rewritten to the new number."
+                         : "No past entries use it.") +
+                   "\nThe sheet gets renamed on the next sync."))
+        return;
+    }
+    if (rekeyPart(num, newNum, stamp)) recordRekey(num, newNum, stamp);
+    num = newNum;
+    invModalNum = newNum;
+  }
+  if (!DB.invCfg[num]) DB.invCfg[num] = { n: name, r: red, g: green };
+  var c = DB.invCfg[num];
+  c.n = name; c.r = red; c.g = green;
+  DB.cfgTouched[num] = stamp;
+  epBust(); save(); renderInv();
+  $("invModal").className = "modal";
+  toast("Saved — sheet updates on the next sync");
+}
+
+function deleteInvPart(){
+  var num = invModalNum;
+  if (!num) return;
+  var qty = DB.inv[num] !== undefined ? DB.inv[num] : 0;
+  var used = partUsageCount(num);
+  var warn = "Delete " + num + " (" + (DB.invCfg[num] ? DB.invCfg[num].n : "") + ")?\n\n";
+  if (qty > 0) warn += "It still shows " + qty + " on hand.\n";
+  if (used) warn += "It appears on " + used + " past log " + (used === 1 ? "entry" : "entries") +
+                    " — that history stays as it is.\n";
+  warn += "\nIt comes off the inventory tab on the sheet too.";
+  if (!confirm(warn)) return;
+  var stamp = Date.now();
+  DB.partTomb[num] = stamp;
+  delete DB.invCfg[num]; delete DB.inv[num];
+  delete DB.invTouched[num]; delete DB.invCounted[num]; delete DB.cfgTouched[num];
+  epBust(); save(); renderInv();
+  $("invModal").className = "modal";
+  toast(num + " deleted");
+}
+
+function openAddPart(){
+  $("naNum").value = ""; $("naName").value = "";
+  $("naQty").value = "0"; $("naRed").value = "0"; $("naGreen").value = "0";
+  $("invAddModal").className = "modal open";
+}
+function saveAddPart(){
+  var num = $("naNum").value.trim().toUpperCase();
+  var name = $("naName").value.trim();
+  if (!num){ toast("Part number needed", true); return; }
+  if (!name) name = num;
+  if (DB.invCfg[num] && !DB.partTomb[num]){
+    toast(num + " is already in inventory", true);
+    $("invAddModal").className = "modal";
+    openInvModal(num);
+    return;
+  }
+  var qty = parseInt($("naQty").value, 10); if (isNaN(qty) || qty < 0) qty = 0;
+  var red = parseInt($("naRed").value, 10); if (isNaN(red) || red < 0) red = 0;
+  var green = parseInt($("naGreen").value, 10); if (isNaN(green) || green < 0) green = 0;
+  var stamp = Date.now();
+  delete DB.partTomb[num];
+  DB.invCfg[num] = { n: name, r: red, g: green };
+  DB.inv[num] = qty;
+  DB.invTouched[num] = stamp;
+  DB.cfgTouched[num] = stamp;
+  epBust(); save(); renderInv();
+  $("invAddModal").className = "modal";
+  toast(num + " added — it'll show on the sheet after the next sync");
 }
 
 /* pull names/thresholds + received-order bookings from the sheet on open */
@@ -1283,10 +1584,26 @@ function pullInvConfig(){
     try {
       if (!resp || !resp.ok) return;
       var changed = false;
+      /* The sheet has already merged its own edits against the last snapshot it
+         got from us, so resp.cfgAt says how current its answer is. Anything we
+         edited after that hasn't reached it yet and must not be overwritten. */
+      var cfgAt = resp.cfgAt || 0;
+      if (resp.del){
+        for (var dnum in resp.del){
+          var dk = dnum.toUpperCase();
+          if (DB.partTomb[dk]) continue;
+          if ((DB.cfgTouched[dk] || 0) > resp.del[dnum]) continue;  /* re-added here since */
+          DB.partTomb[dk] = resp.del[dnum];
+          delete DB.invCfg[dk]; delete DB.inv[dk];
+          delete DB.invTouched[dk]; delete DB.invCounted[dk]; delete DB.cfgTouched[dk];
+          changed = true;
+        }
+      }
       if (resp.names){
         for (var num in resp.names){
           var key = num.toUpperCase();
           var n = resp.names[num];
+          if (DB.partTomb[key]) continue;        /* deleted here — our sync removes the row */
           if (n.retired){
             if (DB.invCfg[key]){ delete DB.invCfg[key]; delete DB.inv[key];
               delete DB.invTouched[key]; delete DB.invCounted[key]; changed = true; }
@@ -1295,6 +1612,7 @@ function pullInvConfig(){
           if (!DB.invCfg[key]) { DB.invCfg[key] = { n: n.n, r: n.r, g: n.g }; changed = true; }
           else {
             var c = DB.invCfg[key];
+            if ((DB.cfgTouched[key] || 0) > cfgAt) continue;   /* unsent local edit wins */
             if (c.n !== n.n || c.r !== n.r || c.g !== n.g){
               c.n = n.n; c.r = n.r; c.g = n.g; changed = true;
             }
@@ -1423,8 +1741,9 @@ function searchShopParts(q){
   var res = $("sPartResults"); res.innerHTML = "";
   if (q.length < 2) return;
   var hits = [];
-  for (var i=0;i<PARTS.length && hits.length<12;i++){
-    var p = PARTS[i];
+  var CAT = epList();
+  for (var i=0;i<CAT.length && hits.length<12;i++){
+    var p = CAT[i];
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
@@ -1578,8 +1897,9 @@ function searchParts(q){
   var res = $("partResults"); res.innerHTML = "";
   if (q.length < 2) return;
   var hits = [];
-  for (var i=0;i<PARTS.length && hits.length<12;i++){
-    var p = PARTS[i];
+  var CAT = epList();
+  for (var i=0;i<CAT.length && hits.length<12;i++){
+    var p = CAT[i];
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
@@ -1750,6 +2070,16 @@ $("btnInvSave").onclick = function(){
   renderInv();
   toast(invModalNum + " set to " + v + " — counted");
 };
+$("btnInvEdit").onclick = function(){
+  var w = $("invEditWrap"), open = w.style.display !== "none";
+  w.style.display = open ? "none" : "block";
+  $("btnInvEdit").textContent = open ? "EDIT DETAILS" : "HIDE DETAILS";
+};
+$("btnInvEditSave").onclick = saveInvEdit;
+$("btnInvDelete").onclick = deleteInvPart;
+$("btnInvAdd").onclick = openAddPart;
+$("btnNaCancel").onclick = function(){ $("invAddModal").className = "modal"; };
+$("btnNaSave").onclick = saveAddPart;
 $("btnInvReset").onclick = function(){
   var n = 0; for (var k in DB.invCounted) n++;
   if (!n){ toast("Nothing to reset — no parts marked counted"); return; }
@@ -1802,8 +2132,9 @@ function searchQpParts(q){
   var res = $("qpPartResults"); res.innerHTML = "";
   if (q.length < 2) return;
   var hits = [];
-  for (var i=0;i<PARTS.length && hits.length<12;i++){
-    var p = PARTS[i];
+  var CAT = epList();
+  for (var i=0;i<CAT.length && hits.length<12;i++){
+    var p = CAT[i];
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }

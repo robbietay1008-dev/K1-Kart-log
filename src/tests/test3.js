@@ -5,10 +5,16 @@ const http = require('http');
   // local server to capture the sync POST
   let captured = null;
   const server = http.createServer((req, res) => {
+    if (req.method !== 'POST') {
+      const cb = new URL(req.url, 'http://x').searchParams.get('callback');
+      res.writeHead(200, { 'Content-Type': 'application/javascript' });
+      res.end(cb ? cb + '({"ok":true})' : 'ok');
+      return;
+    }
     let body = '';
     req.on('data', c => body += c);
     req.on('end', () => {
-      captured = body;
+      if (body.indexOf('"type":"snapshot"') > -1) captured = body;
       res.writeHead(200, { 'Access-Control-Allow-Origin': '*' });
       res.end('ok');
     });
@@ -46,6 +52,7 @@ const http = require('http');
   await page.click('#btnSaveSync');
   await page.waitForTimeout(200);
   await page.click('#btnSyncNow');
+  await page.waitForTimeout(800);
   await page.waitForTimeout(1200);
   const status = await page.$eval('#syncStatus', el => el.textContent);
   console.log('sync status text:', status);
@@ -70,22 +77,13 @@ const http = require('http');
   await page.$$eval('#batRow .schip', els => { els[0].click(); });
   await page.waitForTimeout(6500); // wait past debounce
   console.log('auto-sync fired after status edit:', captured ? 'YES' : 'NO');
-  if (captured) console.log('kart1 bat1 in payload:', JSON.parse(captured).karts['1'].status.bat1);
+  if (captured) {
+    /* karts 1, 35 and 36 were retired on request, so read whichever is first */
+    const ks = JSON.parse(captured).karts, first = Object.keys(ks)[0];
+    console.log('kart ' + first + ' bat1 in payload:', ks[first].status.bat1);
+  }
 
-  // ---- export workbook has PARTS USED + KART NOTES ----
-  const exp = await page.evaluate(() => {
-    const wb = buildWorkbook();
-    const names = wb.SheetNames.slice(0, 4);
-    const pu = XLSX.utils.sheet_to_json(wb.Sheets['PARTS USED'], { header: 1 }).slice(0, 4);
-    const ad = XLSX.utils.sheet_to_json(wb.Sheets['ALL DATES'], { header: 1 });
-    const k3row = ad.find(r => String(r[0]) === '3');
-    const k3sheet = XLSX.utils.sheet_to_json(wb.Sheets['3'], { header: 1 });
-    return { names, pu, k3row, k3status: k3sheet[1] };
-  });
-  console.log('sheet names:', exp.names);
-  console.log('PARTS USED top rows:', JSON.stringify(exp.pu));
-  console.log('ALL DATES kart3 row:', JSON.stringify(exp.k3row));
-  console.log('kart3 tab status row (notes in col E):', JSON.stringify(exp.k3status));
+  // (Excel export was removed from the app on request — block dropped)
 
   console.log('ERRORS:', errors.length ? errors : 'none');
   await browser.close();

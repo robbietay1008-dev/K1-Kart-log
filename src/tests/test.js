@@ -44,11 +44,7 @@ const { chromium } = require('playwright');
   const brakeAfter = await page.$eval('#svcRow', el => el.textContent);
   console.log('svc row after brake flush (should show today):', brakeAfter);
 
-  // tire cycle
-  await page.$$eval('#tireRow .tirebtn', els => { els[0].click(); });
-  await page.waitForTimeout(200);
-  const tireTxt = await page.$eval('#tireRow', el => el.textContent);
-  console.log('tires after 1 tap on FL:', tireTxt);
+  // (tire checking was removed from the app on request — block dropped)
 
   // verify persistence
   await page.reload();
@@ -58,13 +54,7 @@ const { chromium } = require('playwright');
   const hist3 = await page.$$eval('#historyList .entry', els => els.length);
   console.log('kart 2 history after reload (persistence):', hist3);
 
-  // build workbook in-page and dump to file to verify export
-  const b64 = await page.evaluate(() => {
-    const wb = buildWorkbook();
-    return XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
-  });
-  require('fs').writeFileSync('test_export.xlsx', Buffer.from(b64, 'base64'));
-  console.log('export bytes:', Buffer.from(b64, 'base64').length);
+  // (Excel export was removed from the app on request — block dropped)
 
   // junior kart check (no diff/brake chips, 2 batteries)
   await page.click('#btnBack');
