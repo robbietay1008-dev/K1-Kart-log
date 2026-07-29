@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v7.1-peek';
+var LOGIC_VER = 'v7.2';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -93,6 +93,10 @@ function handleGet(e) {
     step3('karttabs', function () { writeKartTabs(ss3, snap3); });
     step3('needed', function () { writeNeeded(ss3, snap3.inv); });
     step3('orderview', function () { ensureOrderView(ss3); });
+    /* record the outcome so the app's health check reflects reality —
+       a stale failure would otherwise keep warning about a fixed problem */
+    saveJson('lastSync', { at: new Date().toISOString(),
+                           build: (snap3.appBuild || '') + '+redraw', errs: errs3 });
     return txt('redraw ' + (only || 'all') + ' [' + LOGIC_VER + ']: ' +
                (errs3.length ? 'ERRORS ' + errs3.join(' | ') : 'ok'));
   }
