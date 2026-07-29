@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v7-flush';
+var LOGIC_VER = 'v7.1-peek';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -95,6 +95,20 @@ function handleGet(e) {
     step3('orderview', function () { ensureOrderView(ss3); });
     return txt('redraw ' + (only || 'all') + ' [' + LOGIC_VER + ']: ' +
                (errs3.length ? 'ERRORS ' + errs3.join(' | ') : 'ok'));
+  }
+  if (e && e.parameter && e.parameter.mode === 'peek') {
+    /* Read-only look at a tab: row count plus the first few rows. */
+    var ssp = SpreadsheetApp.getActiveSpreadsheet();
+    var tp = ssp.getSheetByName(e.parameter.tab || 'APP LOG');
+    if (!tp) return txt('missing tab');
+    var lr = tp.getLastRow(), lc = tp.getLastColumn();
+    var want = Math.min(lr, parseInt(e.parameter.rows, 10) || 4);
+    var body = '';
+    if (want > 0 && lc > 0) {
+      var vv = tp.getRange(1, 1, want, lc).getDisplayValues();
+      for (var vi = 0; vi < vv.length; vi++) body += '\n' + vv[vi].join(' | ');
+    }
+    return txt(tp.getName() + ': rows=' + lr + ' cols=' + lc + body);
   }
   if (e && e.parameter && e.parameter.mode === 'diag') {
     /* Report exactly which sheet operation a tab refuses. Read-only except
