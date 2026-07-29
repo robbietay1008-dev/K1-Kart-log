@@ -282,9 +282,18 @@ function batColor(s) {
 function freshSheet(ss, name, textCols) {
   var sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
-  sh.clearContents();
-  if (textCols) for (var i = 0; i < textCols.length; i++)
-    sh.getRange(textCols[i] + ':' + textCols[i]).setNumberFormat('@');
+  try {
+    sh.clearContents();
+    if (textCols) for (var i = 0; i < textCols.length; i++)
+      sh.getRange(textCols[i] + ':' + textCols[i]).setNumberFormat('@');
+  } catch (e) {
+    /* a Sheets "table" (typed columns) blocks formatting — rebuild the tab clean */
+    var pos = sh.getIndex();
+    ss.deleteSheet(sh);
+    sh = ss.insertSheet(name, pos - 1);
+    if (textCols) for (var j = 0; j < textCols.length; j++)
+      sh.getRange(textCols[j] + ':' + textCols[j]).setNumberFormat('@');
+  }
   return sh;
 }
 function kartOrder(karts) {
