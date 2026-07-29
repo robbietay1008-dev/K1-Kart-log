@@ -7,6 +7,8 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
+var LOGIC_VER = 'v6-freshsheet';
+
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
 function handlePost(e) {
@@ -64,14 +66,21 @@ function handleGet(e) {
   }
   if (e && e.parameter && e.parameter.mode === 'inv') {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var payload2 = JSON.stringify({ ok: true, names: invConfigFromSheet(ss),
+    var payload2 = JSON.stringify({ ok: true, ver: LOGIC_VER,
+                                    names: invConfigFromSheet(ss),
                                     receipts: loadJson('receipts', []),
                                     have: Object.keys(loadJson('photo_index', {})),
                                     last: loadJson('lastSync', null) });
     return ContentService.createTextOutput(cb + '(' + payload2 + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
   }
-  return txt('kart log sync is running');
+  if (e && e.parameter && e.parameter.mode === 'bust') {
+    /* drop the cached copy of this file so the very next call re-fetches
+       it from GitHub — no more waiting out the 10-minute window */
+    try { CacheService.getScriptCache().remove('klogic'); } catch (eb) {}
+    return txt('logic cache cleared (was ' + LOGIC_VER + ')');
+  }
+  return txt('kart log sync is running (' + LOGIC_VER + ')');
 }
 
 function txt(s) { return ContentService.createTextOutput(s); }
@@ -279,22 +288,47 @@ function batColor(s) {
 }
 
 /* ================= sheet writers ================= */
+/* Best-effort text formatting. Returns false if any column refused
+   (a Sheets "table" makes typed columns un-formattable). Never throws. */
+function fmtTextCols(sh, cols) {
+  if (!cols) return true;
+  var ok = true;
+  for (var i = 0; i < cols.length; i++) {
+    try { sh.getRange(cols[i] + ':' + cols[i]).setNumberFormat('@'); }
+    catch (e) { ok = false; }
+  }
+  return ok;
+}
+
 function freshSheet(ss, name, textCols) {
   var sh = ss.getSheetByName(name);
-  if (!sh) sh = ss.insertSheet(name);
+  if (!sh) { sh = ss.insertSheet(name); fmtTextCols(sh, textCols); return sh; }
+
+  var cleared = false;
+  try { sh.clearContents(); cleared = true; } catch (e0) { cleared = false; }
+  if (cleared && fmtTextCols(sh, textCols)) return sh;
+
+  /* The tab is a Sheets "table" (or otherwise unwritable): stand up a clean
+     replacement. Rename the old one FIRST so the new tab can take the real
+     name even if the delete is refused — a stray "<name> OLD" tab is a far
+     better outcome than an empty tab and an aborted write. */
+  var pos = 1;
+  try { pos = sh.getIndex(); } catch (e1) { pos = 1; }
+  var junk = name + ' OLD';
   try {
-    sh.clearContents();
-    if (textCols) for (var i = 0; i < textCols.length; i++)
-      sh.getRange(textCols[i] + ':' + textCols[i]).setNumberFormat('@');
-  } catch (e) {
-    /* a Sheets "table" (typed columns) blocks formatting — rebuild the tab clean */
-    var pos = sh.getIndex();
-    ss.deleteSheet(sh);
-    sh = ss.insertSheet(name, pos - 1);
-    if (textCols) for (var j = 0; j < textCols.length; j++)
-      sh.getRange(textCols[j] + ':' + textCols[j]).setNumberFormat('@');
-  }
-  return sh;
+    var prior = ss.getSheetByName(junk);
+    if (prior) ss.deleteSheet(prior);
+  } catch (e2) {}
+  var renamed = false;
+  try { sh.setName(junk); renamed = true; } catch (e3) { renamed = false; }
+  if (!renamed) return sh;   /* can't free the name — write into it anyway */
+
+  var nsh;
+  try { nsh = ss.insertSheet(name, pos - 1); }
+  catch (e4) { nsh = ss.insertSheet(name); }
+  try { ss.deleteSheet(ss.getSheetByName(junk)); } catch (e5) {}
+  fmtTextCols(nsh, textCols);
+  return nsh;
 }
 function kartOrder(karts) {
   return Object.keys(karts).sort(function (a, b) { return (+a) - (+b); });
