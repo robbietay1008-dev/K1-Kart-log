@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.1';
+var LOGIC_VER = 'v8.2';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -655,18 +655,22 @@ function sameCfg(a, b) {
 }
 
 /* ---- FITS column (N): which karts a part goes on ----
-   Stored in the app as 'A' (adult only), 'J' (jr only) or '' (fits both), and
-   typed on the sheet as a word. Anything unrecognised reads as "both", so an
-   empty column on 400-odd existing rows means nothing changes for them. */
+   Stored in the app as 'A' (adult only), 'J' (jr only), 'N' (never on a kart --
+   shop/facility stock) or '' (fits both adult and jr), and typed on the sheet as
+   a word. Anything unrecognised reads as "both", so an empty column on 400-odd
+   existing rows means nothing changes for them. */
 function normKind(v) {
   var s = String(v === null || v === undefined ? '' : v).trim().toUpperCase();
   if (!s) return '';
   var c = s.charAt(0);
   if (c === 'A') return 'A';
   if (c === 'J') return 'J';
+  if (c === 'N') return 'N';   /* NOT KART -- shop/facility part, never on a kart */
   return '';
 }
-function kindLabel(k) { return k === 'A' ? 'ADULT' : (k === 'J' ? 'JR' : 'BOTH'); }
+function kindLabel(k) {
+  return k === 'A' ? 'ADULT' : (k === 'J' ? 'JR' : (k === 'N' ? 'NOT KART' : 'BOTH'));
+}
 
 /* make sure column N exists and is labelled before we write into it */
 function ensureFitsColumn(sh) {

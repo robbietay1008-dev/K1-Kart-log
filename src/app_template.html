@@ -1332,18 +1332,21 @@ function epList(){
 }
 function partRow(num){ epList(); return EP_INDEX[String(num).toUpperCase()] || null; }
 
-/* ---- which karts a part fits: "A" adult only, "J" jr only, "" both ---- */
-var FITS_OPTS = [["","BOTH"],["A","ADULT"],["J","JR"]];
+/* ---- which karts a part fits: "A" adult only, "J" jr only, "N" never goes
+   on a kart at all (shop/facility stuff), "" fits both adult and jr ---- */
+var FITS_OPTS = [["","BOTH"],["A","ADULT"],["J","JR"],["N","NOT KART"]];
 function fitsOk(kind, isJr){
   if (!kind) return true;               /* blank means it goes on anything */
+  if (kind === "N") return false;       /* never offered for a kart */
   return isJr ? (kind === "J") : (kind === "A");
 }
 function fitsTag(kind){
   if (kind === "A") return ' <span style="color:#7ab7ff;font-weight:800">ADULT</span>';
   if (kind === "J") return ' <span style="color:#ffb74d;font-weight:800">JR</span>';
+  if (kind === "N") return ' <span style="color:#9aa3ad;font-weight:800">NOT KART</span>';
   return "";
 }
-/* three chips wired to a variable the caller owns, read back through get() */
+/* the FITS chips wired to a variable the caller owns, read back through get() */
 function renderFitsChips(rowId, get, set){
   var row = $(rowId); if (!row) return;
   row.innerHTML = "";
@@ -1961,10 +1964,12 @@ function searchParts(q){
   var hits = [];
   var CAT = epList();
   /* only offer parts that fit the kart being logged: adult karts see the
-     both/all parts plus adult-only ones, jr karts see both plus jr-only */
+     both/all parts plus adult-only ones, jr karts see both plus jr-only.
+     NOT KART parts are never offered here even with no kart picked yet. */
   var jrKart = currentKart ? ((+currentKart) >= 41) : null;
   for (var i=0;i<CAT.length && hits.length<12;i++){
     var p = CAT[i];
+    if ((p[4] || "") === "N") continue;
     if (jrKart !== null && !fitsOk(p[4] || "", jrKart)) continue;
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
@@ -2200,10 +2205,12 @@ function searchQpParts(q){
   var hits = [];
   var CAT = epList();
   /* a quick pick scoped to adult karts shouldn't offer jr-only parts, and the
-     other way round; an "all karts" one still sees everything */
+     other way round; an "all karts" one still sees everything. quick picks
+     always land on a kart, so NOT KART parts are out of all of them. */
   var scopeJr = qpScope === "jr" ? true : (qpScope === "adult" ? false : null);
   for (var i=0;i<CAT.length && hits.length<12;i++){
     var p = CAT[i];
+    if ((p[4] || "") === "N") continue;
     if (scopeJr !== null && !fitsOk(p[4] || "", scopeJr)) continue;
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);

@@ -401,6 +401,64 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     ok('FITS does not ping-pong', Object.keys(diff).length === 0, diff);
   }
 
+  /* ---------- 8b. NOT KART: stock that never goes on a kart ---------- */
+  console.log('\n8b. FITS — NOT KART');
+  await A.page.evaluate(() => { renderInv(); showScreen('scrInv'); });
+  await A.page.click('#btnInvAdd');
+  await A.page.fill('#naNum', 'shoprag1');
+  await A.page.fill('#naName', 'shop rags box');
+  await A.page.fill('#naQty', '6');
+  await A.page.evaluate(() => {
+    var chips = $('naFitsRow').querySelectorAll('.chip');
+    for (var i = 0; i < chips.length; i++) if (chips[i].textContent === 'NOT KART') chips[i].click();
+  });
+  await A.page.click('#btnNaSave');
+  s = await A.page.evaluate(() => ({ cfg: DB.invCfg['SHOPRAG1'], row: partRow('SHOPRAG1') }));
+  ok('NOT KART stored on the part', s.cfg && s.cfg.k === 'N', s.cfg);
+  ok('NOT KART reaches the catalog', s.row && s.row[4] === 'N', s.row);
+
+  s = await A.page.evaluate(() => {
+    var out = {}, keep = currentKart, keepScope = qpScope;
+    currentKart = '7';  searchParts('SHOPRAG1'); out.onAdult = $('partResults').textContent;
+    currentKart = '45'; searchParts('SHOPRAG1'); out.onJr = $('partResults').textContent;
+    currentKart = null; searchParts('SHOPRAG1'); out.noKart = $('partResults').textContent;
+    currentKart = keep;
+    qpScope = 'all';    searchQpParts('SHOPRAG1'); out.qpAll = $('qpPartResults').textContent;
+    qpScope = keepScope;
+    searchShopParts('SHOPRAG1'); out.shop = $('sPartResults').textContent;
+    return out;
+  });
+  ok('NOT KART hidden on an adult kart', s.onAdult.indexOf('shop rags') === -1, s.onAdult);
+  ok('NOT KART hidden on a jr kart', s.onJr.indexOf('shop rags') === -1, s.onJr);
+  ok('NOT KART hidden with no kart picked', s.noKart.indexOf('shop rags') === -1, s.noKart);
+  ok('NOT KART out of every quick pick', s.qpAll.indexOf('shop rags') === -1, s.qpAll);
+  ok('NOT KART still usable in the shop', s.shop.indexOf('shop rags') > -1, s.shop);
+  ok('NOT KART badged in the shop list', s.shop.indexOf('NOT KART') > -1, s.shop);
+
+  await A.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  r = rowsOf();
+  ok('NOT KART lands on the sheet as a word', r.SHOPRAG1 && r.SHOPRAG1.k === 'NOT KART', r.SHOPRAG1);
+
+  /* typed by hand on the sheet it comes back too */
+  for (let i = 1; i < sheet._g.length; i++)
+    if (String(sheet._g[i][1]) === '59012') sheet._g[i][13] = 'not kart';
+  await B.page.evaluate(() => pullInvConfig());
+  await sleep(1200);
+  s = await B.page.evaluate(() => ({ c: DB.invCfg['59012'], rag: DB.invCfg['SHOPRAG1'] }));
+  ok('B picked up the sheet-typed NOT KART', s.c && s.c.k === 'N', s.c);
+  ok('B picked up the app-set NOT KART', s.rag && s.rag.k === 'N', s.rag);
+
+  const beforeNk = JSON.stringify(rowsOf());
+  await B.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  {
+    const a = JSON.parse(beforeNk), b2 = rowsOf(), diff = {};
+    for (const k in b2) if (JSON.stringify(a[k]) !== JSON.stringify(b2[k])) diff[k] = [a[k], b2[k]];
+    for (const k in a) if (!(k in b2)) diff[k] = [a[k], null];
+    ok('NOT KART does not ping-pong', Object.keys(diff).length === 0, diff);
+  }
+
   /* ---------- 9. no script errors anywhere ---------- */
   console.log('\n9. runtime');
   const errs = A.errors.concat(B.errors);
