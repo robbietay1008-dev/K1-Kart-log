@@ -18,18 +18,20 @@ function ok(label, cond, extra) {
 }
 
 /* ---------------- fake sheet ---------------- */
-function makeSheet(rows) {
+function makeSheet(rows, name) {
   const g = rows.map(r => { const c = r.slice(); while (c.length < 14) c.push(''); return c; });
   return {
     _g: g,
-    getName: () => 'inventory',
-    getLastRow: () => g.length,
+    getName: () => name || 'inventory',
+    getLastRow: () => { let n = 0; for (let i = 0; i < g.length; i++) if (g[i].some(v => v !== '' && v !== null)) n = i + 1; return n; },
     getLastColumn: () => 14,
     getMaxColumns: () => 14,
     insertColumnsAfter() {},
+    insertRowsAfter(after, n) { for (let i = 0; i < n; i++) g.push(new Array(14).fill('')); },
+    setColumnWidth() {},
     deleteRow(r) { g.splice(r - 1, 1); },
     getRange(a, b, c, d) {
-      if (typeof a === 'string') return { setNumberFormat: () => {}, setValue: () => {} };
+      if (typeof a === 'string') return { setNumberFormat: () => {}, setValue: () => {}, getValue: () => '' };
       const r0 = a, c0 = b, nr = c === undefined ? 1 : c, nc = d === undefined ? 1 : d;
       return {
         getValues() {
@@ -52,6 +54,7 @@ function makeSheet(rows) {
           return this;
         },
         setValue(v) { return this.setValues([[v]]); },
+        clearContent() { return this.setValues(new Array(nr).fill(0).map(() => new Array(nc).fill(''))); },
         setNumberFormat() { return this; },
         setBackgrounds() { return this; },
         setFontWeight() { return this; },
@@ -69,13 +72,16 @@ const sheet = makeSheet([HDR,
   ['', 'CHAIN219', 'chain 219', 8, '', 2, 6],
   ['', 'SEATBOLT', 'seat bolt', 40, '', 5, 12]]);
 const store = {};
+const tabs = { inventory: sheet };
 
 const sandbox = {
   console,
   SpreadsheetApp: {
     getActiveSpreadsheet: () => ({
-      getSheetByName: n => (n === 'inventory' ? sheet : null),
-      getSheets: () => [sheet], insertSheet: () => sheet, deleteSheet: () => {},
+      getSheetByName: n => tabs[n] || null,
+      getSheets: () => Object.keys(tabs).map(k => tabs[k]),
+      insertSheet: n => (tabs[n] = makeSheet([new Array(14).fill('')], n)),
+      deleteSheet: () => {},
       getSpreadsheetTimeZone: () => 'UTC'
     }),
     flush: () => {}, getUi: () => { throw new Error('no ui'); }
@@ -102,13 +108,19 @@ function receiveSnapshot(data) {
       inv: __d.inv || {}, invCfg: __d.invCfg || {}, tomb: __d.tomb || {}, stamps: __d.stamps || {},
       invTouched: __d.invTouched || {}, cfgTouched: __d.cfgTouched || {},
       partTomb: __d.partTomb || {}, rekeys: __d.rekeys || [] });
-    mergeCfg(SpreadsheetApp.getActiveSpreadsheet(), loadJson('snapshot', null));
+    var __ss = SpreadsheetApp.getActiveSpreadsheet();
+    mergeCfg(__ss, loadJson('snapshot', null));
+    writeInventoryQty(__ss, __d.inv || {}, __d.invCfg || {});
   `, sandbox);
 }
 function invAnswer() {
   return vm.runInContext(`
-    (function(){ var r = mergeCfg(SpreadsheetApp.getActiveSpreadsheet(), loadJson('snapshot', null));
-      return JSON.stringify({ ok: true, names: r.names, del: r.del, cfgAt: r.at }); })()
+    (function(){ var ss = SpreadsheetApp.getActiveSpreadsheet();
+      var snap = loadJson('snapshot', null);
+      var r = mergeCfg(ss, snap);
+      scanCounts(ss, snap && snap.inv);
+      return JSON.stringify({ ok: true, names: r.names, del: r.del, cfgAt: r.at,
+                              receipts: loadJson('receipts', []) }); })()
   `, sandbox);
 }
 function snapAnswer() {
@@ -458,6 +470,49 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     for (const k in a) if (!(k in b2)) diff[k] = [a[k], null];
     ok('NOT KART does not ping-pong', Object.keys(diff).length === 0, diff);
   }
+
+  /* ---------- 8c. paper count sheet fills the inventory in ---------- */
+  console.log('\n8c. APP COUNT SHEET');
+  const post = d => vm.runInContext('writeCountRows(SpreadsheetApp.getActiveSpreadsheet(), __c)',
+    Object.assign(sandbox, { __c: d }));
+
+  /* make sure the sheet is holding the app's current numbers before we count */
+  await A.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  const beforeQty = await A.page.evaluate(() => DB.inv['59191']);
+  post({ rows: [
+    { p: 1, l: 267, num: '059191' },        /* leading zero, as the paper prints it */
+    { p: 1, l: 268, num: 'SHOPRAG1' },
+    { p: 1, l: 269, num: 'NOSUCHPART' }
+  ] });
+  const cg = tabs['APP COUNT SHEET']._g;
+  ok('count tab exists with the transcription', cg[1][2] === '059191' && cg[2][2] === 'SHOPRAG1', cg.slice(1, 4));
+  ok('names come off the inventory tab', !!cg[1][3] && cg[1][3] === rowsOf()['59191'].n, cg[1]);
+  ok('a part we do not stock is flagged', cg[3][7] === 'not in inventory', cg[3]);
+
+  /* he walks the shelves and writes the numbers in */
+  cg[1][5] = 17;
+  cg[2][5] = 0;
+  await A.page.evaluate(() => pullInvConfig());
+  await sleep(1500);
+  s = await A.page.evaluate(() => ({ b: DB.inv['59191'], c: DB.inv['SHOPRAG1'],
+                                     cb: DB.invCounted['59191'], cc: DB.invCounted['SHOPRAG1'] }));
+  ok('the counted number replaces the stock', s.b === 17 && beforeQty !== 17, [beforeQty, s.b]);
+  ok('a count of zero empties the shelf', s.c === 0, s.c);
+  ok('counted parts get ticked off', s.cb === 1 && s.cc === 1, s);
+  ok('the sheet records what it applied', cg[1][6] === 17 && /counted/.test(String(cg[1][7])), cg[1]);
+
+  /* and it goes back the other way on the next sync */
+  await A.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  r = rowsOf();
+  ok('the inventory tab agrees', r['59191'] && r['59191'].q === 17, r['59191']);
+
+  /* pulling again must not double-apply */
+  await A.page.evaluate(() => pullInvConfig());
+  await sleep(1200);
+  s = await A.page.evaluate(() => DB.inv['59191']);
+  ok('a second pull changes nothing', s === 17, s);
 
   /* ---------- 9. no script errors anywhere ---------- */
   console.log('\n9. runtime');

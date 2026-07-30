@@ -7,7 +7,9 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.2';
+var LOGIC_VER = 'v8.3';
+
+var COUNT_TAB = 'APP COUNT SHEET';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -19,6 +21,7 @@ function handlePost(e) {
     lock.waitLock(40000);
     try {
       if (data.type === 'photo') { savePhoto(data); return txt('ok photo'); }
+      if (data.type === 'count') { return txt(writeCountRows(SpreadsheetApp.getActiveSpreadsheet(), data)); }
       if (data.type === 'snapshot') {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
         saveJson('snapshot', { savedAt: new Date().toISOString(), appBuild: data.appBuild || '',
@@ -37,6 +40,7 @@ function handlePost(e) {
         step('parts used', function(){ writePartsUsed(ss, data); });
         step('kart tabs', function(){ writeKartTabs(ss, data); });
         step('part config', function(){ mergeCfg(ss, data); });
+        step('counts', function(){ scanCounts(ss, data.inv); });
         step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg); });
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
@@ -79,7 +83,13 @@ function handleGet(e) {
     var res2 = { names: null, del: null, at: 0 };
     var lk2 = LockService.getScriptLock();
     if (lk2.tryLock(15000)) {
-      try { res2 = mergeCfg(ss, loadJson('snapshot', null)); }
+      try {
+        var snapI = loadJson('snapshot', null);
+        res2 = mergeCfg(ss, snapI);
+        /* pick up anything freshly counted on the paper-count tab so the
+           receipts below already include it — no extra round trip */
+        try { scanCounts(ss, snapI && snapI.inv); } catch (ec) {}
+      }
       catch (em) { res2 = { names: invConfigFromSheet(ss), del: null, at: 0, err: String(em) }; }
       finally { lk2.releaseLock(); }
     }
@@ -970,4 +980,149 @@ function bookReceivedImpl() {
   if (receipts.length > 400) receipts = receipts.slice(receipts.length - 400);
   saveJson('receipts', receipts);
   SpreadsheetApp.getUi().alert(booked + ' row(s), ' + units + ' unit(s) booked into stock. The app applies them next time it opens or syncs. Split shipments: just raise QTY RECEIVED when the rest arrives and book again — only the new amount gets added.');
+}
+
+/* ================= v8.3: APP COUNT SHEET =================
+   The monthly recount happens on paper: a printed list of part numbers with a
+   blank "New Qty" column that gets filled in by hand while walking the shelves.
+   This tab is that paper, typed up. Rows land here (either posted in as a
+   transcription or typed straight onto the tab), the counted number goes in
+   NEW QTY, and the next sync turns each one into an absolute-set receipt that
+   the app applies to the part's quantity and ticks off the recount checklist.
+
+   NEW QTY vs APPLIED works exactly like QTY RECEIVED vs QTY BOOKED on APP
+   ORDERS: the script only acts when the two differ, so re-typing a corrected
+   count re-applies it and leaving a row alone does nothing.
+
+   Layout: A PAGE  B LINE  C PART #  D DESCRIPTION  E IN STOCK
+           F NEW QTY  G APPLIED  H STATUS                                   */
+
+var COUNT_HDR = ['PAGE', 'LINE', 'PART #', 'DESCRIPTION', 'IN STOCK',
+                 'NEW QTY', 'APPLIED', 'STATUS'];
+
+function countSheet(ss, make) {
+  var sh = ss.getSheetByName(COUNT_TAB);
+  if (!sh) {
+    if (!make) return null;
+    sh = ss.insertSheet(COUNT_TAB);
+  }
+  if (String(sh.getRange(1, 3).getValue() || '').trim() !== 'PART #') {
+    sh.getRange(1, 1, 1, COUNT_HDR.length).setValues([COUNT_HDR]);
+    tryOp(function () { sh.getRange(1, 1, 1, COUNT_HDR.length).setFontWeight('bold'); });
+    tryOp(function () { sh.setFrozenRows(1); });
+    tryOp(function () { sh.getRange('C:C').setNumberFormat('@'); });
+    tryOp(function () { sh.setColumnWidth(4, 420); });
+  }
+  return sh;
+}
+
+/* The paper prints part numbers with a leading zero ("059012") while the
+   inventory tab stores them bare ("59012"). Try it as typed first, then with
+   zeros stripped, then padded, so either spelling finds the same part. */
+function matchPart(raw, byNum) {
+  var s = String(raw === null || raw === undefined ? '' : raw).trim().toUpperCase();
+  if (!s) return '';
+  if (byNum[s]) return s;
+  var bare = s.replace(/^0+/, '');
+  if (bare && byNum[bare]) return bare;
+  for (var z = 1; z <= 3; z++) {
+    var pad = new Array(z + 1).join('0') + bare;
+    if (byNum[pad]) return pad;
+  }
+  return '';
+}
+
+/* ---- POST type:'count' -> lay a transcribed paper page onto the tab ----
+   data.rows: [{p: page, l: line no, num: part number, d: description,
+                q: counted qty or ''}]
+   data.replace: 1 wipes what's there first, otherwise rows are appended.
+   Descriptions are filled in from the inventory tab when not supplied, so a
+   transcription only really has to carry the numbers. */
+function writeCountRows(ss, data) {
+  var rows = (data && data.rows) || [];
+  if (!rows.length && !(data && data.replace)) return 'no rows';
+  var sh = countSheet(ss, true);
+  /* handlePost already holds the script lock for this request */
+  {
+    if (data.replace && sh.getLastRow() > 1)
+      sh.getRange(2, 1, sh.getLastRow() - 1, COUNT_HDR.length).clearContent();
+    var byNum = invRows(ss).byNum;
+    var out = [], miss = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i] || {};
+      var key = matchPart(r.num, byNum);
+      var known = key ? byNum[key] : null;
+      if (!key) miss++;
+      var q = r.q;
+      q = (q === '' || q === null || q === undefined) ? '' : (parseInt(q, 10));
+      if (q !== '' && isNaN(q)) q = '';
+      out.push([r.p === undefined ? '' : r.p,
+                r.l === undefined ? '' : r.l,
+                String(r.num === undefined ? '' : r.num),
+                r.d || (known ? known.n : ''),
+                '',
+                q, '', key ? '' : 'not in inventory']);
+    }
+    if (out.length) {
+      var start = Math.max(2, sh.getLastRow() + 1);
+      if (sh.getMaxRows() < start + out.length)
+        sh.insertRowsAfter(sh.getMaxRows(), start + out.length - sh.getMaxRows());
+      tryOp(function () { sh.getRange(start, 3, out.length, 1).setNumberFormat('@'); });
+      sh.getRange(start, 1, out.length, COUNT_HDR.length).setValues(out);
+    }
+    SpreadsheetApp.flush();
+    return 'ok count: ' + out.length + ' rows' + (miss ? ', ' + miss + ' with no matching part' : '');
+  }
+}
+
+/* ---- turn filled-in counts into receipts the app applies ----
+   Also refreshes IN STOCK and any blank description so the tab reads as a
+   live picture of the shelf while the count is being walked. */
+function scanCounts(ss, inv) {
+  var sh = countSheet(ss, false);
+  if (!sh) return 0;
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var rows = sh.getRange(2, 1, last - 1, COUNT_HDR.length).getValues();
+  var byNum = invRows(ss).byNum;
+  inv = inv || {};
+  var receipts = loadJson('receipts', []);
+  var stamp = Date.now();
+  var made = 0, dirty = false;
+
+  for (var i = 0; i < rows.length; i++) {
+    var raw = rows[i][2];
+    if (raw === '' || raw === null) continue;
+    var key = matchPart(raw, byNum);
+    var known = key ? byNum[key] : null;
+
+    if (!rows[i][3] && known) { rows[i][3] = known.n; dirty = true; }
+    var have = (key && inv[key] !== undefined) ? inv[key] : '';
+    if (rows[i][4] !== have) { rows[i][4] = have; dirty = true; }
+
+    var nq = rows[i][5];
+    if (nq === '' || nq === null) continue;
+    nq = parseInt(nq, 10);
+    if (isNaN(nq) || nq < 0) { rows[i][7] = 'not a number'; dirty = true; continue; }
+    if (!key) { rows[i][7] = 'not in inventory'; dirty = true; continue; }
+
+    var applied = rows[i][6];
+    applied = (applied === '' || applied === null) ? null : parseInt(applied, 10);
+    if (applied !== null && !isNaN(applied) && applied === nq) continue;   /* already done */
+
+    receipts.push({ id: 'ct' + stamp + '_' + (i + 2) + '_' + nq, part: key, qty: nq, set: 1 });
+    rows[i][6] = nq;
+    rows[i][7] = 'counted ' +
+      Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d h:mm a');
+    dirty = true;
+    made++;
+  }
+
+  if (dirty) sh.getRange(2, 1, rows.length, COUNT_HDR.length).setValues(rows);
+  if (made) {
+    if (receipts.length > 400) receipts = receipts.slice(receipts.length - 400);
+    saveJson('receipts', receipts);
+  }
+  SpreadsheetApp.flush();
+  return made;
 }

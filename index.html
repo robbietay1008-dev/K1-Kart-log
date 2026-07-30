@@ -534,7 +534,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0730-0259";
+var APP_BUILD = "0730-1630";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1690,11 +1690,19 @@ function pullInvConfig(){
           if (!rc.id || DB.meta.rcApplied[rc.id]) continue;
           var key2 = String(rc.part).toUpperCase();
           if (DB.inv[key2] === undefined) DB.inv[key2] = 0;
-          DB.inv[key2] += (parseInt(rc.qty,10) || 0);
+          if (rc.set){
+            /* a recount off the paper count sheet: the number IS the stock,
+               not something to add, and it counts as this part being counted */
+            DB.inv[key2] = (parseInt(rc.qty,10) || 0);
+            DB.invCounted[key2] = 1;
+          } else {
+            DB.inv[key2] += (parseInt(rc.qty,10) || 0);
+          }
           DB.invTouched[key2] = Date.now();
           DB.meta.rcApplied[rc.id] = 1;
           changed = true;
-          toast("Stock in: " + rc.qty + " x " + key2);
+          toast(rc.set ? ("Counted: " + key2 + " = " + rc.qty)
+                       : ("Stock in: " + rc.qty + " x " + key2));
         }
       }
       if (resp.last && resp.last.errs && resp.last.errs.length){
