@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.3';
+var LOGIC_VER = 'v8.4';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -29,6 +29,7 @@ function handlePost(e) {
                                quicks: data.quicks || [], inv: data.inv || {},
                                tomb: data.tomb || {}, stamps: data.stamps || {},
                                invTouched: data.invTouched || {}, rc: data.rc || {},
+                               invCounted: data.invCounted || {},
                                invCfg: data.invCfg || {}, parts: data.parts || [],
                                cfgTouched: data.cfgTouched || {},
                                partTomb: data.partTomb || {}, rekeys: data.rekeys || [] });
@@ -40,7 +41,7 @@ function handlePost(e) {
         step('parts used', function(){ writePartsUsed(ss, data); });
         step('kart tabs', function(){ writeKartTabs(ss, data); });
         step('part config', function(){ mergeCfg(ss, data); });
-        step('counts', function(){ scanCounts(ss, data.inv); });
+        step('counts', function(){ scanCounts(ss, data); });
         step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg); });
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
@@ -66,6 +67,7 @@ function handleGet(e) {
                                    tomb: snap ? (snap.tomb || {}) : {},
                                    stamps: snap ? (snap.stamps || {}) : {},
                                    invTouched: snap ? (snap.invTouched || {}) : {},
+                                   invCounted: snap ? (snap.invCounted || {}) : {},
                                    rc: snap ? (snap.rc || {}) : {},
                                    invCfg: snap ? (snap.invCfg || {}) : {},
                                    cfgTouched: snap ? (snap.cfgTouched || {}) : {},
@@ -86,9 +88,8 @@ function handleGet(e) {
       try {
         var snapI = loadJson('snapshot', null);
         res2 = mergeCfg(ss, snapI);
-        /* pick up anything freshly counted on the paper-count tab so the
-           receipts below already include it — no extra round trip */
-        try { scanCounts(ss, snapI && snapI.inv); } catch (ec) {}
+        /* fill the paper-count tab in from whatever the app has counted */
+        try { scanCounts(ss, snapI); } catch (ec) {}
       }
       catch (em) { res2 = { names: invConfigFromSheet(ss), del: null, at: 0, err: String(em) }; }
       finally { lk2.releaseLock(); }
@@ -982,23 +983,19 @@ function bookReceivedImpl() {
   SpreadsheetApp.getUi().alert(booked + ' row(s), ' + units + ' unit(s) booked into stock. The app applies them next time it opens or syncs. Split shipments: just raise QTY RECEIVED when the rest arrives and book again — only the new amount gets added.');
 }
 
-/* ================= v8.3: APP COUNT SHEET =================
-   The monthly recount happens on paper: a printed list of part numbers with a
-   blank "New Qty" column that gets filled in by hand while walking the shelves.
-   This tab is that paper, typed up. Rows land here (either posted in as a
-   transcription or typed straight onto the tab), the counted number goes in
-   NEW QTY, and the next sync turns each one into an absolute-set receipt that
-   the app applies to the part's quantity and ticks off the recount checklist.
+/* ================= APP COUNT SHEET (v8.4) =================
+   The monthly recount is walked on paper. This tab is that paper typed up, in
+   the same running order, and it exists so Robbie can read the counted numbers
+   off it and copy them onto the sheet of paper — nothing more. Three columns:
 
-   NEW QTY vs APPLIED works exactly like QTY RECEIVED vs QTY BOOKED on APP
-   ORDERS: the script only acts when the two differ, so re-typing a corrected
-   count re-applies it and leaving a row alone does nothing.
+       A PART #    B NAME    C QTY
 
-   Layout: A PAGE  B LINE  C PART #  D DESCRIPTION  E IN STOCK
-           F NEW QTY  G APPLIED  H STATUS                                   */
+   Rows are posted in as a transcription (type:'count'). QTY is filled in by the
+   script from the app: whatever a part's stock is once it has been ticked off on
+   the app's recount screen shows up here. Parts not yet counted stay blank, and
+   hitting RESET in the app blanks them again for the next round.                */
 
-var COUNT_HDR = ['PAGE', 'LINE', 'PART #', 'DESCRIPTION', 'IN STOCK',
-                 'NEW QTY', 'APPLIED', 'STATUS'];
+var COUNT_HDR = ['PART #', 'NAME', 'QTY'];
 
 function countSheet(ss, make) {
   var sh = ss.getSheetByName(COUNT_TAB);
@@ -1006,12 +1003,17 @@ function countSheet(ss, make) {
     if (!make) return null;
     sh = ss.insertSheet(COUNT_TAB);
   }
-  if (String(sh.getRange(1, 3).getValue() || '').trim() !== 'PART #') {
+  if (String(sh.getRange(1, 1).getValue() || '').trim() !== COUNT_HDR[0]) {
+    /* first build, or an older/wider layout being replaced — start clean so no
+       stray columns are left sitting to the right of the new ones */
+    tryOp(function () { sh.clearContents(); });
     sh.getRange(1, 1, 1, COUNT_HDR.length).setValues([COUNT_HDR]);
     tryOp(function () { sh.getRange(1, 1, 1, COUNT_HDR.length).setFontWeight('bold'); });
     tryOp(function () { sh.setFrozenRows(1); });
-    tryOp(function () { sh.getRange('C:C').setNumberFormat('@'); });
-    tryOp(function () { sh.setColumnWidth(4, 420); });
+    tryOp(function () { sh.getRange('A:A').setNumberFormat('@'); });
+    tryOp(function () { sh.setColumnWidth(1, 110); });
+    tryOp(function () { sh.setColumnWidth(2, 430); });
+    tryOp(function () { sh.setColumnWidth(3, 70); });
   }
   return sh;
 }
@@ -1033,96 +1035,73 @@ function matchPart(raw, byNum) {
 }
 
 /* ---- POST type:'count' -> lay a transcribed paper page onto the tab ----
-   data.rows: [{p: page, l: line no, num: part number, d: description,
-                q: counted qty or ''}]
+   data.rows: [{num: part number, d: name (optional)}], in paper order.
    data.replace: 1 wipes what's there first, otherwise rows are appended.
-   Descriptions are filled in from the inventory tab when not supplied, so a
+   Names are filled in from the inventory tab when not supplied, so a
    transcription only really has to carry the numbers. */
 function writeCountRows(ss, data) {
   var rows = (data && data.rows) || [];
   if (!rows.length && !(data && data.replace)) return 'no rows';
   var sh = countSheet(ss, true);
   /* handlePost already holds the script lock for this request */
-  {
-    if (data.replace && sh.getLastRow() > 1)
-      sh.getRange(2, 1, sh.getLastRow() - 1, COUNT_HDR.length).clearContent();
-    var byNum = invRows(ss).byNum;
-    var out = [], miss = 0;
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i] || {};
-      var key = matchPart(r.num, byNum);
-      var known = key ? byNum[key] : null;
-      if (!key) miss++;
-      var q = r.q;
-      q = (q === '' || q === null || q === undefined) ? '' : (parseInt(q, 10));
-      if (q !== '' && isNaN(q)) q = '';
-      out.push([r.p === undefined ? '' : r.p,
-                r.l === undefined ? '' : r.l,
-                String(r.num === undefined ? '' : r.num),
-                r.d || (known ? known.n : ''),
-                '',
-                q, '', key ? '' : 'not in inventory']);
-    }
-    if (out.length) {
-      var start = Math.max(2, sh.getLastRow() + 1);
-      if (sh.getMaxRows() < start + out.length)
-        sh.insertRowsAfter(sh.getMaxRows(), start + out.length - sh.getMaxRows());
-      tryOp(function () { sh.getRange(start, 3, out.length, 1).setNumberFormat('@'); });
-      sh.getRange(start, 1, out.length, COUNT_HDR.length).setValues(out);
-    }
-    SpreadsheetApp.flush();
-    return 'ok count: ' + out.length + ' rows' + (miss ? ', ' + miss + ' with no matching part' : '');
+  if (data.replace && sh.getLastRow() > 1)
+    sh.getRange(2, 1, sh.getLastRow() - 1, COUNT_HDR.length).clearContent();
+  var byNum = invRows(ss).byNum;
+  var out = [], miss = 0;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i] || {};
+    var key = matchPart(r.num, byNum);
+    var known = key ? byNum[key] : null;
+    if (!key) miss++;
+    out.push([String(r.num === undefined ? '' : r.num),
+              r.d || (known ? known.n : (key ? '' : '?? not in inventory')),
+              '']);
   }
+  if (out.length) {
+    var start = Math.max(2, sh.getLastRow() + 1);
+    if (sh.getMaxRows() < start + out.length)
+      sh.insertRowsAfter(sh.getMaxRows(), start + out.length - sh.getMaxRows());
+    tryOp(function () { sh.getRange(start, 1, out.length, 1).setNumberFormat('@'); });
+    sh.getRange(start, 1, out.length, COUNT_HDR.length).setValues(out);
+  }
+  SpreadsheetApp.flush();
+  return 'ok count: ' + out.length + ' rows' + (miss ? ', ' + miss + ' with no matching part' : '');
 }
 
-/* ---- turn filled-in counts into receipts the app applies ----
-   Also refreshes IN STOCK and any blank description so the tab reads as a
-   live picture of the shelf while the count is being walked. */
-function scanCounts(ss, inv) {
+/* ---- fill the paper page in from the app's recount ----
+   Every pass: any part the app has ticked off as counted gets its quantity
+   written into QTY, parts it hasn't counted stay blank, and a part that loses
+   its checkmark (RESET in the app) goes blank again. Blank names are backfilled
+   from the inventory tab. Nothing flows the other way — the counting happens on
+   the iPad, this tab just shows the numbers to copy onto the paper. */
+function scanCounts(ss, snap) {
   var sh = countSheet(ss, false);
   if (!sh) return 0;
   var last = sh.getLastRow();
   if (last < 2) return 0;
   var rows = sh.getRange(2, 1, last - 1, COUNT_HDR.length).getValues();
   var byNum = invRows(ss).byNum;
-  inv = inv || {};
-  var receipts = loadJson('receipts', []);
-  var stamp = Date.now();
-  var made = 0, dirty = false;
+  var inv = (snap && snap.inv) || {};
+  var counted = (snap && snap.invCounted) || {};
+  var filled = 0, dirty = false;
 
   for (var i = 0; i < rows.length; i++) {
-    var raw = rows[i][2];
+    var raw = rows[i][0];
     if (raw === '' || raw === null) continue;
     var key = matchPart(raw, byNum);
     var known = key ? byNum[key] : null;
 
-    if (!rows[i][3] && known) { rows[i][3] = known.n; dirty = true; }
-    var have = (key && inv[key] !== undefined) ? inv[key] : '';
-    if (rows[i][4] !== have) { rows[i][4] = have; dirty = true; }
+    if (!rows[i][1] && known) { rows[i][1] = known.n; dirty = true; }
 
-    var nq = rows[i][5];
-    if (nq === '' || nq === null) continue;
-    nq = parseInt(nq, 10);
-    if (isNaN(nq) || nq < 0) { rows[i][7] = 'not a number'; dirty = true; continue; }
-    if (!key) { rows[i][7] = 'not in inventory'; dirty = true; continue; }
-
-    var applied = rows[i][6];
-    applied = (applied === '' || applied === null) ? null : parseInt(applied, 10);
-    if (applied !== null && !isNaN(applied) && applied === nq) continue;   /* already done */
-
-    receipts.push({ id: 'ct' + stamp + '_' + (i + 2) + '_' + nq, part: key, qty: nq, set: 1 });
-    rows[i][6] = nq;
-    rows[i][7] = 'counted ' +
-      Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'M/d h:mm a');
-    dirty = true;
-    made++;
+    var want = '';
+    if (key && counted[key]) {
+      want = (inv[key] === undefined || inv[key] === null) ? 0 : inv[key];
+      filled++;
+    }
+    if (rows[i][2] !== want) { rows[i][2] = want; dirty = true; }
   }
 
   if (dirty) sh.getRange(2, 1, rows.length, COUNT_HDR.length).setValues(rows);
-  if (made) {
-    if (receipts.length > 400) receipts = receipts.slice(receipts.length - 400);
-    saveJson('receipts', receipts);
-  }
   SpreadsheetApp.flush();
-  return made;
+  return filled;
 }

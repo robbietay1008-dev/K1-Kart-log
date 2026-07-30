@@ -106,10 +106,12 @@ function receiveSnapshot(data) {
   vm.runInContext(`
     saveJson('snapshot', { karts: __d.karts || {}, shop: __d.shop || [], quicks: __d.quicks || null,
       inv: __d.inv || {}, invCfg: __d.invCfg || {}, tomb: __d.tomb || {}, stamps: __d.stamps || {},
-      invTouched: __d.invTouched || {}, cfgTouched: __d.cfgTouched || {},
+      invTouched: __d.invTouched || {}, invCounted: __d.invCounted || {},
+      cfgTouched: __d.cfgTouched || {},
       partTomb: __d.partTomb || {}, rekeys: __d.rekeys || [] });
     var __ss = SpreadsheetApp.getActiveSpreadsheet();
     mergeCfg(__ss, loadJson('snapshot', null));
+    scanCounts(__ss, loadJson('snapshot', null));
     writeInventoryQty(__ss, __d.inv || {}, __d.invCfg || {});
   `, sandbox);
 }
@@ -118,7 +120,7 @@ function invAnswer() {
     (function(){ var ss = SpreadsheetApp.getActiveSpreadsheet();
       var snap = loadJson('snapshot', null);
       var r = mergeCfg(ss, snap);
-      scanCounts(ss, snap && snap.inv);
+      scanCounts(ss, snap);
       return JSON.stringify({ ok: true, names: r.names, del: r.del, cfgAt: r.at,
                               receipts: loadJson('receipts', []) }); })()
   `, sandbox);
@@ -471,7 +473,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     ok('NOT KART does not ping-pong', Object.keys(diff).length === 0, diff);
   }
 
-  /* ---------- 8c. paper count sheet fills the inventory in ---------- */
+  /* ---------- 8c. the paper count sheet fills in from the app ---------- */
   console.log('\n8c. APP COUNT SHEET');
   const post = d => vm.runInContext('writeCountRows(SpreadsheetApp.getActiveSpreadsheet(), __c)',
     Object.assign(sandbox, { __c: d }));
@@ -479,40 +481,55 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   /* make sure the sheet is holding the app's current numbers before we count */
   await A.page.evaluate(() => syncNow(true));
   await sleep(1200);
-  const beforeQty = await A.page.evaluate(() => DB.inv['59191']);
-  post({ rows: [
-    { p: 1, l: 267, num: '059191' },        /* leading zero, as the paper prints it */
-    { p: 1, l: 268, num: 'SHOPRAG1' },
-    { p: 1, l: 269, num: 'NOSUCHPART' }
+  post({ replace: 1, rows: [
+    { num: '059191' },                      /* leading zero, as the paper prints it */
+    { num: 'SHOPRAG1' },
+    { num: 'NOSUCHPART' }
   ] });
   const cg = tabs['APP COUNT SHEET']._g;
-  ok('count tab exists with the transcription', cg[1][2] === '059191' && cg[2][2] === 'SHOPRAG1', cg.slice(1, 4));
-  ok('names come off the inventory tab', !!cg[1][3] && cg[1][3] === rowsOf()['59191'].n, cg[1]);
-  ok('a part we do not stock is flagged', cg[3][7] === 'not in inventory', cg[3]);
+  ok('count tab exists with the transcription', cg[1][0] === '059191' && cg[2][0] === 'SHOPRAG1', cg.slice(1, 4));
+  ok('names come off the inventory tab', !!cg[1][1] && cg[1][1] === rowsOf()['59191'].n, cg[1]);
+  ok('a part we do not stock is called out', /not in inventory/.test(String(cg[3][1])), cg[3]);
+  ok('nothing counted yet, so qty is blank', cg[1][2] === '' && cg[2][2] === '', cg.slice(1, 3));
 
-  /* he walks the shelves and writes the numbers in */
-  cg[1][5] = 17;
-  cg[2][5] = 0;
-  await A.page.evaluate(() => pullInvConfig());
-  await sleep(1500);
-  s = await A.page.evaluate(() => ({ b: DB.inv['59191'], c: DB.inv['SHOPRAG1'],
-                                     cb: DB.invCounted['59191'], cc: DB.invCounted['SHOPRAG1'] }));
-  ok('the counted number replaces the stock', s.b === 17 && beforeQty !== 17, [beforeQty, s.b]);
-  ok('a count of zero empties the shelf', s.c === 0, s.c);
-  ok('counted parts get ticked off', s.cb === 1 && s.cc === 1, s);
-  ok('the sheet records what it applied', cg[1][6] === 17 && /counted/.test(String(cg[1][7])), cg[1]);
-
-  /* and it goes back the other way on the next sync */
-  await A.page.evaluate(() => syncNow(true));
-  await sleep(1200);
+  /* he counts them on the iPad */
+  await A.page.evaluate(() => {
+    DB.inv['59191'] = 17; DB.invTouched['59191'] = Date.now(); DB.invCounted['59191'] = 1;
+    DB.inv['SHOPRAG1'] = 0; DB.invTouched['SHOPRAG1'] = Date.now(); DB.invCounted['SHOPRAG1'] = 1;
+    save();
+  });
+  /* hand A's snapshot to the receiver directly — device B syncs on its own
+     timer, and whichever push lands last owns the stored snapshot */
+  const pushA = async () => receiveSnapshot(JSON.parse(
+    await A.page.evaluate(() => JSON.stringify(buildSnapshot()))));
+  await pushA();
+  ok('the counted number lands on the paper page', cg[1][2] === 17, cg[1]);
+  ok('a count of zero shows as 0, not blank', cg[2][2] === 0, cg[2]);
+  ok('the part we do not stock stays blank', cg[3][2] === '', cg[3]);
   r = rowsOf();
   ok('the inventory tab agrees', r['59191'] && r['59191'].q === 17, r['59191']);
 
-  /* pulling again must not double-apply */
+  /* a pull must not undo any of it */
   await A.page.evaluate(() => pullInvConfig());
   await sleep(1200);
-  s = await A.page.evaluate(() => DB.inv['59191']);
-  ok('a second pull changes nothing', s === 17, s);
+  s = await A.page.evaluate(() => ({ q: DB.inv['59191'], c: DB.invCounted['59191'] }));
+  ok('a pull leaves the count alone', s.q === 17 && s.c === 1, s);
+
+  /* RESET on the app blanks the page for the next round */
+  await A.page.evaluate(() => {
+    var now = Date.now();
+    for (var k in DB.invCounted) DB.invTouched[k] = now;
+    DB.invCounted = {}; save();
+  });
+  await pushA();
+  ok('RESET clears the page but not the stock', cg[1][2] === '' && rowsOf()['59191'].q === 17, cg[1]);
+
+  /* and B picks the cleared checkmarks up */
+  await B.page.evaluate(() => syncNow(true));
+  await sleep(1500);
+  s = await B.page.evaluate(() => ({ n: (function(){ var c=0; for (var k in DB.invCounted) c++; return c; })(),
+                                     q: DB.inv['59191'] }));
+  ok('the other device sees the reset', s.n === 0 && s.q === 17, s);
 
   /* ---------- 9. no script errors anywhere ---------- */
   console.log('\n9. runtime');

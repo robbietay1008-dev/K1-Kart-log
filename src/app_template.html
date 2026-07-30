@@ -735,6 +735,7 @@ function buildSnapshot(){
   return { type:"snapshot", app:"k1kartlog", appBuild: APP_BUILD, karts: karts,
            shop: DB.shop.slice(0), quicks: DB.quicks, inv: DB.inv, invCfg: DB.invCfg,
            tomb: DB.tomb, stamps: DB.stamps, invTouched: DB.invTouched,
+           invCounted: DB.invCounted,
            cfgTouched: DB.cfgTouched, partTomb: DB.partTomb, rekeys: DB.rekeys,
            rc: DB.meta.rcApplied, parts: PARTS };
 }
@@ -863,11 +864,16 @@ function mergeRemote(r){
     DB.cfgTouched[cnum] = rct[cnum];
   }
   /* inventory per part, newest touch wins */
-  var rit = r.invTouched || {}, rin = r.inv || {};
+  var rit = r.invTouched || {}, rin = r.inv || {}, ric = r.invCounted || {};
   for (var num in rit){
     if (DB.partTomb[num]) continue;
     if (rin[num] !== undefined && rit[num] > (DB.invTouched[num] || 0)){
-      DB.inv[num] = rin[num]; DB.invTouched[num] = rit[num]; changed = true;
+      DB.inv[num] = rin[num]; DB.invTouched[num] = rit[num];
+      /* the recount checkmark travels with the count that set it, so a part
+         counted on the iPad shows as counted everywhere — and a RESET, which
+         re-stamps every cleared part, clears it everywhere */
+      if (ric[num]) DB.invCounted[num] = 1; else delete DB.invCounted[num];
+      changed = true;
     }
   }
   /* receipt-applied + photo link unions */
@@ -2163,6 +2169,10 @@ $("btnInvReset").onclick = function(){
   var n = 0; for (var k in DB.invCounted) n++;
   if (!n){ toast("Nothing to reset — no parts marked counted"); return; }
   if (!confirm("Reset all " + n + " counted checkmarks?\n\nQuantities stay as they are — this just clears the \u2713 marks for the next recount round.")) return;
+  /* re-stamp each cleared part so the other devices and the sheet see the
+     checkmark go away — the quantity itself is untouched */
+  var now = Date.now();
+  for (var k2 in DB.invCounted) DB.invTouched[k2] = now;
   DB.invCounted = {};
   save(); renderInv();
   toast("Recount checklist reset");
