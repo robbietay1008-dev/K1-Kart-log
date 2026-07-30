@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.0';
+var LOGIC_VER = 'v8.1';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -584,7 +584,8 @@ function invConfigFromSheet(ss) {
   if (!sh) return out;
   var last = sh.getLastRow();
   if (last < 2) return out;
-  var vals = sh.getRange(2, 2, last - 1, 6).getValues(); // B..G: part, name, qty, inventoried, red, green
+  var wide = Math.min(13, Math.max(6, sh.getMaxColumns() - 1));
+  var vals = sh.getRange(2, 2, last - 1, wide).getValues(); // B..N: part, name, qty, inventoried, red, green ... fits
   for (var i = 0; i < vals.length; i++) {
     var num = vals[i][0];
     if (num === '' || num === null) continue;
@@ -593,6 +594,7 @@ function invConfigFromSheet(ss) {
       n: nm,
       r: parseInt(vals[i][4], 10) || 0,
       g: parseInt(vals[i][5], 10) || 0,
+      k: normKind(vals[i][12]),
       retired: /\(RETIRED\)/i.test(nm) ? 1 : 0
     };
   }
@@ -625,14 +627,15 @@ function writeInventoryQty(ss, inv, cfgFromApp) {
    the two sides never have to agree on time — cfgTouched values from the app
    are compared against the newest cfgTouched the mirror was built from. */
 
-/* inventory tab as a lookup: B=part C=name D=qty E=counted F=red G=green */
+/* inventory tab as a lookup: B=part C=name D=qty E=counted F=red G=green N=fits */
 function invRows(ss) {
   var sh = ss.getSheetByName('inventory');
   var out = { sh: sh, byNum: {} };
   if (!sh) return out;
   var last = sh.getLastRow();
   if (last < 2) return out;
-  var vals = sh.getRange(2, 2, last - 1, 6).getValues();
+  var wide = Math.min(13, Math.max(6, sh.getMaxColumns() - 1));
+  var vals = sh.getRange(2, 2, last - 1, wide).getValues();
   for (var i = 0; i < vals.length; i++) {
     var num = String(vals[i][0] === null ? '' : vals[i][0]).trim().toUpperCase();
     if (!num || out.byNum[num]) continue;      /* first row wins on duplicates */
@@ -640,18 +643,45 @@ function invRows(ss) {
     out.byNum[num] = { row: i + 2, n: nm,
                        r: parseInt(vals[i][4], 10) || 0,
                        g: parseInt(vals[i][5], 10) || 0,
+                       k: normKind(vals[i][12]),
                        retired: /\(RETIRED\)/i.test(nm) ? 1 : 0 };
   }
   return out;
 }
 
 function sameCfg(a, b) {
-  return !!a && !!b && a.n === b.n && (a.r || 0) === (b.r || 0) && (a.g || 0) === (b.g || 0);
+  return !!a && !!b && a.n === b.n && (a.r || 0) === (b.r || 0) && (a.g || 0) === (b.g || 0) &&
+         (a.k || '') === (b.k || '');
+}
+
+/* ---- FITS column (N): which karts a part goes on ----
+   Stored in the app as 'A' (adult only), 'J' (jr only) or '' (fits both), and
+   typed on the sheet as a word. Anything unrecognised reads as "both", so an
+   empty column on 400-odd existing rows means nothing changes for them. */
+function normKind(v) {
+  var s = String(v === null || v === undefined ? '' : v).trim().toUpperCase();
+  if (!s) return '';
+  var c = s.charAt(0);
+  if (c === 'A') return 'A';
+  if (c === 'J') return 'J';
+  return '';
+}
+function kindLabel(k) { return k === 'A' ? 'ADULT' : (k === 'J' ? 'JR' : 'BOTH'); }
+
+/* make sure column N exists and is labelled before we write into it */
+function ensureFitsColumn(sh) {
+  if (sh.getMaxColumns() < 14) sh.insertColumnsAfter(sh.getMaxColumns(), 14 - sh.getMaxColumns());
+  var h = sh.getRange(1, 14);
+  if (String(h.getValue() || '').trim() === '') {
+    h.setValue('FITS');
+    tryOp(function () { h.setFontWeight('bold'); });
+  }
 }
 
 function mergeCfg(ss, snap) {
   var sh = ss.getSheetByName('inventory');
   if (!sh) return { names: {}, del: null, at: 0 };
+  tryOp(function () { ensureFitsColumn(sh); });
 
   var ours = (snap && snap.invCfg) || {};
   var touched = (snap && snap.cfgTouched) || {};
@@ -690,7 +720,8 @@ function mergeCfg(ss, snap) {
       if (theirs[rk.to]) dropRows.push(src.row);          /* target row already there */
       else {
         edits.push({ row: src.row, col: 2, v: rk.to });
-        theirs[rk.to] = { row: src.row, n: src.n, r: src.r, g: src.g, retired: src.retired };
+        theirs[rk.to] = { row: src.row, n: src.n, r: src.r, g: src.g, k: src.k,
+                          retired: src.retired };
       }
       delete theirs[rk.from];
     }
@@ -719,11 +750,11 @@ function mergeCfg(ss, snap) {
       continue;
     }
     /* legacy "(RETIRED)" rows: report them, never rewrite or delete them */
-    if (t && t.retired) { names[k] = { n: t.n, r: t.r, g: t.g, retired: 1 }; continue; }
+    if (t && t.retired) { names[k] = { n: t.n, r: t.r, g: t.g, k: t.k, retired: 1 }; continue; }
 
     if (t && !o) {                       /* typed onto the sheet, app doesn't have it */
-      names[k] = { n: t.n, r: t.r, g: t.g };
-      base[k] = { n: t.n, r: t.r, g: t.g };
+      names[k] = { n: t.n, r: t.r, g: t.g, k: t.k || '' };
+      base[k] = { n: t.n, r: t.r, g: t.g, k: t.k || '' };
       delete del[k];
       continue;
     }
@@ -736,8 +767,8 @@ function mergeCfg(ss, snap) {
         continue;
       }
       appends.push(k);                   /* new in the app (or re-added after a delete) */
-      names[k] = { n: o.n, r: o.r, g: o.g };
-      base[k] = { n: o.n, r: o.r, g: o.g };
+      names[k] = { n: o.n, r: o.r, g: o.g, k: o.k || '' };
+      base[k] = { n: o.n, r: o.r, g: o.g, k: o.k || '' };
       delete del[k];
       continue;
     }
@@ -758,9 +789,10 @@ function mergeCfg(ss, snap) {
       if (win.n !== t.n) edits.push({ row: t.row, col: 3, v: win.n });
       if ((win.r || 0) !== t.r) edits.push({ row: t.row, col: 6, v: win.r || 0 });
       if ((win.g || 0) !== t.g) edits.push({ row: t.row, col: 7, v: win.g || 0 });
+      if ((win.k || '') !== (t.k || '')) edits.push({ row: t.row, col: 14, v: kindLabel(win.k || '') });
     }
-    names[k] = { n: win.n, r: win.r, g: win.g };
-    base[k] = { n: win.n, r: win.r, g: win.g };
+    names[k] = { n: win.n, r: win.r, g: win.g, k: win.k || '' };
+    base[k] = { n: win.n, r: win.r, g: win.g, k: win.k || '' };
     delete del[k];
   }
 
@@ -780,14 +812,17 @@ function mergeCfg(ss, snap) {
   if (appends.length) {
     var newRows = [];
     if (appends.length > 500) appends = appends.slice(0, 500);
+    var newFits = [];
     for (i = 0; i < appends.length; i++) {
       var an = appends[i], ac = ours[an];
       var q2 = inv[an] !== undefined ? inv[an] : 0;
       newRows.push(['', an, ac.n || an, q2, '', ac.r || 0, ac.g || 0]);
+      newFits.push([ac.k ? kindLabel(ac.k) : '']);
     }
     var start = sh.getLastRow() + 1;
     tryOp(function () { sh.getRange(start, 2, newRows.length, 1).setNumberFormat('@'); });
     sh.getRange(start, 1, newRows.length, 7).setValues(newRows);
+    tryOp(function () { sh.getRange(start, 14, newFits.length, 1).setValues(newFits); });
   }
   SpreadsheetApp.flush();
 

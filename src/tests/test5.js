@@ -19,12 +19,14 @@ function ok(label, cond, extra) {
 
 /* ---------------- fake sheet ---------------- */
 function makeSheet(rows) {
-  const g = rows.map(r => { const c = r.slice(); while (c.length < 7) c.push(''); return c; });
+  const g = rows.map(r => { const c = r.slice(); while (c.length < 14) c.push(''); return c; });
   return {
     _g: g,
     getName: () => 'inventory',
     getLastRow: () => g.length,
-    getLastColumn: () => 7,
+    getLastColumn: () => 14,
+    getMaxColumns: () => 14,
+    insertColumnsAfter() {},
     deleteRow(r) { g.splice(r - 1, 1); },
     getRange(a, b, c, d) {
       if (typeof a === 'string') return { setNumberFormat: () => {}, setValue: () => {} };
@@ -41,9 +43,10 @@ function makeSheet(rows) {
           return out;
         },
         getDisplayValues() { return this.getValues().map(r => r.map(String)); },
+        getValue() { return this.getValues()[0][0]; },
         setValues(v) {
           for (let i = 0; i < v.length; i++) {
-            while (g.length < r0 - 1 + i + 1) g.push(['', '', '', '', '', '', '']);
+            while (g.length < r0 - 1 + i + 1) g.push(['','','','','','','','','','','','','','']);
             for (let j = 0; j < v[i].length; j++) g[r0 - 1 + i][c0 - 1 + j] = v[i][j];
           }
           return this;
@@ -118,7 +121,8 @@ function snapAnswer() {
 function rowsOf() {
   const m = {};
   for (let i = 1; i < sheet._g.length; i++)
-    if (sheet._g[i][1]) m[String(sheet._g[i][1])] = { n: sheet._g[i][2], q: sheet._g[i][3], r: sheet._g[i][5], g: sheet._g[i][6] };
+    if (sheet._g[i][1]) m[String(sheet._g[i][1])] = { n: sheet._g[i][2], q: sheet._g[i][3], r: sheet._g[i][5],
+                                                      g: sheet._g[i][6], k: sheet._g[i][13] };
   return m;
 }
 
@@ -294,7 +298,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   console.log('\n7. an app edit the sheet has not seen yet wins');
   await B.page.evaluate(() => {
     DB.invCfg['59191'].n = 'OPTIMA BATTERY RED TOP';
-    DB.cfgTouched['59191'] = Date.now() + 5000;   /* newer than anything the sheet knows */
+    DB.cfgTouched['59191'] = Date.now();   /* newer than anything the sheet knows */
     saveQuiet();
   });
   await B.page.evaluate(() => pullInvConfig());
@@ -305,8 +309,100 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(1200);
   ok('and then reaches the sheet', rowsOf()['59191'].n === 'OPTIMA BATTERY RED TOP', rowsOf()['59191']);
 
-  /* ---------- 8. no script errors anywhere ---------- */
-  console.log('\n8. runtime');
+  /* ---------- 8. adult / jr / both ---------- */
+  console.log('\n8. FITS — adult, jr or both');
+  /* let A catch up first so this section only changes the FITS field */
+  await A.page.evaluate(() => pullInvConfig());
+  await sleep(1200);
+
+  await A.page.evaluate(() => { renderInv(); showScreen('scrInv'); });
+  await A.page.click('#btnInvAdd');
+  await A.page.fill('#naNum', 'jrtire1');
+  await A.page.fill('#naName', 'jr rear tire');
+  await A.page.fill('#naQty', '12');
+  await A.page.evaluate(() => {
+    var chips = $('naFitsRow').querySelectorAll('.chip');
+    for (var i = 0; i < chips.length; i++) if (chips[i].textContent === 'JR') chips[i].click();
+  });
+  s = await A.page.evaluate(() => {
+    var on = $('naFitsRow').querySelectorAll('.chip.on');
+    return on.length === 1 ? on[0].textContent : '(' + on.length + ')';
+  });
+  ok('JR chip selects on its own', s === 'JR', s);
+  await A.page.click('#btnNaSave');
+  s = await A.page.evaluate(() => ({ cfg: DB.invCfg['JRTIRE1'], row: partRow('JRTIRE1') }));
+  ok('kind stored on the new part', s.cfg && s.cfg.k === 'J', s.cfg);
+  ok('kind reaches the catalog', s.row && s.row[4] === 'J', s.row);
+
+  /* mark an existing part adult-only through the edit panel */
+  await A.page.evaluate(() => openInvModal('59191'));
+  await A.page.click('#btnInvEdit');
+  s = await A.page.evaluate(() => {
+    var on = $('invEFitsRow').querySelectorAll('.chip.on');
+    return on.length === 1 ? on[0].textContent : '(' + on.length + ')';
+  });
+  ok('edit panel starts on BOTH', s === 'BOTH', s);
+  await A.page.evaluate(() => {
+    var chips = $('invEFitsRow').querySelectorAll('.chip');
+    for (var i = 0; i < chips.length; i++) if (chips[i].textContent === 'ADULT') chips[i].click();
+  });
+  await A.page.click('#btnInvEditSave');
+  s = await A.page.evaluate(() => ({ k: DB.invCfg['59191'].k, n: DB.invCfg['59191'].n }));
+  ok('adult-only saved', s.k === 'A', s);
+  ok('name untouched by the FITS save', !!s.n, s);
+
+  /* the part search on the log form only offers what fits the kart */
+  s = await A.page.evaluate(() => {
+    var out = {}, keep = currentKart;
+    currentKart = '7';   searchParts('JRTIRE1'); out.jrOnAdult = $('partResults').textContent;
+    currentKart = '45';  searchParts('JRTIRE1'); out.jrOnJr = $('partResults').textContent;
+    currentKart = '7';   searchParts('59191');   out.adOnAdult = $('partResults').textContent;
+    currentKart = '45';  searchParts('59191');   out.adOnJr = $('partResults').textContent;
+    currentKart = '7';   searchParts('CHN219H'); out.bothOnAdult = $('partResults').textContent;
+    currentKart = '45';  searchParts('CHN219H'); out.bothOnJr = $('partResults').textContent;
+    currentKart = keep;
+    searchShopParts('JRTIRE1'); out.shop = $('sPartResults').textContent;
+    return out;
+  });
+  ok('jr part hidden on an adult kart', s.jrOnAdult.indexOf('jr rear tire') === -1, s.jrOnAdult);
+  ok('jr part offered on a jr kart', s.jrOnJr.indexOf('jr rear tire') > -1, s.jrOnJr);
+  ok('adult part offered on an adult kart', s.adOnAdult.indexOf('ADULT') > -1, s.adOnAdult);
+  ok('adult part hidden on a jr kart', s.adOnJr.indexOf('ADULT') === -1, s.adOnJr);
+  ok('a both part shows on an adult kart', s.bothOnAdult.indexOf('chain 219 heavy') > -1, s.bothOnAdult);
+  ok('a both part shows on a jr kart', s.bothOnJr.indexOf('chain 219 heavy') > -1, s.bothOnJr);
+  ok('shop parts are never filtered', s.shop.indexOf('jr rear tire') > -1, s.shop);
+
+  /* it reaches the sheet's FITS column */
+  await A.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  r = rowsOf();
+  ok('FITS header written', sheet._g[0][13] === 'FITS', sheet._g[0][13]);
+  ok('new jr part lands as JR', r.JRTIRE1 && r.JRTIRE1.k === 'JR', r.JRTIRE1);
+  ok('edited part lands as ADULT', r['59191'] && r['59191'].k === 'ADULT', r['59191']);
+  ok('a both part is left blank', (r.CHN219H.k || '') === '', r.CHN219H);
+
+  /* typed on the sheet, it comes back to the app */
+  for (let i = 1; i < sheet._g.length; i++)
+    if (String(sheet._g[i][1]) === 'CHN219H') sheet._g[i][13] = 'adult';
+  await B.page.evaluate(() => pullInvConfig());
+  await sleep(1200);
+  s = await B.page.evaluate(() => ({ chn: DB.invCfg['CHN219H'], jr: DB.invCfg['JRTIRE1'] }));
+  ok('B picked up the sheet-typed ADULT', s.chn && s.chn.k === 'A', s.chn);
+  ok('B picked up the app-set JR', s.jr && s.jr.k === 'J', s.jr);
+
+  /* and a second round trip changes nothing */
+  const beforeFits = JSON.stringify(rowsOf());
+  await B.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  {
+    const a = JSON.parse(beforeFits), b2 = rowsOf(), diff = {};
+    for (const k in b2) if (JSON.stringify(a[k]) !== JSON.stringify(b2[k])) diff[k] = [a[k], b2[k]];
+    for (const k in a) if (!(k in b2)) diff[k] = [a[k], null];
+    ok('FITS does not ping-pong', Object.keys(diff).length === 0, diff);
+  }
+
+  /* ---------- 9. no script errors anywhere ---------- */
+  console.log('\n9. runtime');
   const errs = A.errors.concat(B.errors);
   ok('no page errors', errs.length === 0, errs.slice(0, 4));
 

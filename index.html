@@ -258,6 +258,8 @@
       <label class="f" style="margin-top:10px">PART NUMBER</label>
       <input type="text" class="in" id="invENum" autocapitalize="characters">
       <p style="color:#8a7; font-size:12px; margin:6px 0 0">Changing the number renames it everywhere — past log entries and the sheet too.</p>
+      <label class="f" style="margin-top:10px">FITS</label>
+      <div class="chiprow" id="invEFitsRow"></div>
       <div style="display:flex; gap:10px; margin-top:10px">
         <span style="flex:1">
           <label class="f">RED AT OR BELOW</label>
@@ -288,6 +290,8 @@
     <input type="text" class="in" id="naNum" autocapitalize="characters">
     <label class="f" style="margin-top:10px">PART NAME</label>
     <input type="text" class="in" id="naName">
+    <label class="f" style="margin-top:10px">FITS</label>
+    <div class="chiprow" id="naFitsRow"></div>
     <div style="display:flex; gap:10px; margin-top:10px">
       <span style="flex:1">
         <label class="f">ON HAND</label>
@@ -530,7 +534,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0729-2231";
+var APP_BUILD = "0730-0042";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -846,10 +850,13 @@ function mergeRemote(r){
     var rc2 = rcfg[cnum], lc2 = DB.invCfg[cnum];
     if (!lc2){
       DB.invCfg[cnum] = { n: rc2.n, r: rc2.r, g: rc2.g };
+      if (rc2.k) DB.invCfg[cnum].k = rc2.k;
       if (rc2.t !== undefined) DB.invCfg[cnum].t = rc2.t;
       changed = true;
-    } else if (lc2.n !== rc2.n || lc2.r !== rc2.r || lc2.g !== rc2.g){
+    } else if (lc2.n !== rc2.n || lc2.r !== rc2.r || lc2.g !== rc2.g ||
+               (lc2.k || "") !== (rc2.k || "")){
       lc2.n = rc2.n; lc2.r = rc2.r; lc2.g = rc2.g;
+      if (rc2.k) lc2.k = rc2.k; else delete lc2.k;
       if (rc2.t !== undefined) lc2.t = rc2.t;
       changed = true;
     }
@@ -1311,18 +1318,45 @@ function epList(){
     if (DB.partTomb[key]) continue;
     seen[key] = 1;
     var c = DB.invCfg[key];
-    out.push([PARTS[i][0], (c && c.n) ? c.n : PARTS[i][1], PARTS[i][2], PARTS[i][3]]);
+    out.push([PARTS[i][0], (c && c.n) ? c.n : PARTS[i][1], PARTS[i][2], PARTS[i][3],
+              (c && c.k) ? c.k : ""]);
   }
   for (var num in DB.invCfg){
     if (seen[num] || DB.partTomb[num]) continue;
     var c2 = DB.invCfg[num];
-    out.push([num, c2.n || num, "", (c2.t === undefined ? -1 : c2.t)]);
+    out.push([num, c2.n || num, "", (c2.t === undefined ? -1 : c2.t), c2.k || ""]);
   }
   EP_LIST = out; EP_INDEX = {};
   for (i=0;i<out.length;i++) EP_INDEX[out[i][0].toUpperCase()] = out[i];
   return out;
 }
 function partRow(num){ epList(); return EP_INDEX[String(num).toUpperCase()] || null; }
+
+/* ---- which karts a part fits: "A" adult only, "J" jr only, "" both ---- */
+var FITS_OPTS = [["","BOTH"],["A","ADULT"],["J","JR"]];
+function fitsOk(kind, isJr){
+  if (!kind) return true;               /* blank means it goes on anything */
+  return isJr ? (kind === "J") : (kind === "A");
+}
+function fitsTag(kind){
+  if (kind === "A") return ' <span style="color:#7ab7ff;font-weight:800">ADULT</span>';
+  if (kind === "J") return ' <span style="color:#ffb74d;font-weight:800">JR</span>';
+  return "";
+}
+/* three chips wired to a variable the caller owns, read back through get() */
+function renderFitsChips(rowId, get, set){
+  var row = $(rowId); if (!row) return;
+  row.innerHTML = "";
+  for (var i=0;i<FITS_OPTS.length;i++){
+    (function(val, label){
+      var c = document.createElement("button");
+      c.className = "chip" + (get() === val ? " on" : "");
+      c.textContent = label;
+      c.onclick = function(){ set(val); renderFitsChips(rowId, get, set); };
+      row.appendChild(c);
+    })(FITS_OPTS[i][0], FITS_OPTS[i][1]);
+  }
+}
 
 /* background: absorb other devices' work every couple of minutes */
 setInterval(function(){
@@ -1366,6 +1400,7 @@ function renderInv(){
       if (done) div.style.borderColor = "#1d7a3e";
       var th = (p && p[3] >= 0 && THUMBS[p[3]]) ? '<img class="pthumb" src="'+THUMBS[p[3]]+'">' : '';
       div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(c.n)+
+        fitsTag(c.k || "") +
         (done ? ' <span style="color:#4caf7a;font-weight:800">&#10003; counted</span>' : '')+'</span>' +
         '<span class="qbadge '+(done ? "q-green" : "q-grey")+'">'+(DB.inv[num]!==undefined?DB.inv[num]:"?")+'</span>';
       div.onclick = function(){ openInvModal(num); };
@@ -1394,6 +1429,9 @@ function renderInvFilters(){
   }
 }
 var invModalNum = null;
+var invEFits = "";
+function invEFitsGet(){ return invEFits; }
+function invEFitsSet(v){ invEFits = v; }
 function openInvModal(num){
   invModalNum = num;
   var c = DB.invCfg[num];
@@ -1407,6 +1445,8 @@ function openInvModal(num){
   $("invENum").value = num;
   $("invERed").value = c ? (c.r || 0) : 0;
   $("invEGreen").value = c ? (c.g || 0) : 0;
+  invEFits = (c && c.k) ? c.k : "";
+  renderFitsChips("invEFitsRow", invEFitsGet, invEFitsSet);
   $("invEditWrap").style.display = "none";
   $("btnInvEdit").textContent = "EDIT DETAILS";
   $("invModal").className = "modal open";
@@ -1464,6 +1504,7 @@ function rekeyPart(from, to, stamp){
   if (oldCfg){
     var pr = partRow(from);
     var cfg = { n: oldCfg.n, r: oldCfg.r, g: oldCfg.g };
+    if (oldCfg.k) cfg.k = oldCfg.k;
     if (oldCfg.t !== undefined) cfg.t = oldCfg.t;
     else if (pr && pr[3] >= 0) cfg.t = pr[3];
     if (!DB.invCfg[to]) DB.invCfg[to] = cfg;
@@ -1521,6 +1562,7 @@ function saveInvEdit(){
   if (!DB.invCfg[num]) DB.invCfg[num] = { n: name, r: red, g: green };
   var c = DB.invCfg[num];
   c.n = name; c.r = red; c.g = green;
+  if (invEFits) c.k = invEFits; else delete c.k;
   DB.cfgTouched[num] = stamp;
   epBust(); save(); renderInv();
   $("invModal").className = "modal";
@@ -1547,9 +1589,14 @@ function deleteInvPart(){
   toast(num + " deleted");
 }
 
+var naFits = "";
+function naFitsGet(){ return naFits; }
+function naFitsSet(v){ naFits = v; }
 function openAddPart(){
   $("naNum").value = ""; $("naName").value = "";
   $("naQty").value = "0"; $("naRed").value = "0"; $("naGreen").value = "0";
+  naFits = "";
+  renderFitsChips("naFitsRow", naFitsGet, naFitsSet);
   $("invAddModal").className = "modal open";
 }
 function saveAddPart(){
@@ -1569,6 +1616,7 @@ function saveAddPart(){
   var stamp = Date.now();
   delete DB.partTomb[num];
   DB.invCfg[num] = { n: name, r: red, g: green };
+  if (naFits) DB.invCfg[num].k = naFits;
   DB.inv[num] = qty;
   DB.invTouched[num] = stamp;
   DB.cfgTouched[num] = stamp;
@@ -1609,13 +1657,27 @@ function pullInvConfig(){
               delete DB.invTouched[key]; delete DB.invCounted[key]; changed = true; }
             continue;
           }
-          if (!DB.invCfg[key]) { DB.invCfg[key] = { n: n.n, r: n.r, g: n.g }; changed = true; }
-          else {
+          var took = false;
+          if (!DB.invCfg[key]) {
+            DB.invCfg[key] = { n: n.n, r: n.r, g: n.g };
+            if (n.k) DB.invCfg[key].k = n.k;
+            took = true;
+          } else {
             var c = DB.invCfg[key];
             if ((DB.cfgTouched[key] || 0) > cfgAt) continue;   /* unsent local edit wins */
-            if (c.n !== n.n || c.r !== n.r || c.g !== n.g){
-              c.n = n.n; c.r = n.r; c.g = n.g; changed = true;
+            if (c.n !== n.n || c.r !== n.r || c.g !== n.g || (c.k || "") !== (n.k || "")){
+              c.n = n.n; c.r = n.r; c.g = n.g;
+              if (n.k) c.k = n.k; else delete c.k;
+              took = true;
             }
+          }
+          /* Stamp what we just took from the sheet as current up to cfgAt. Without
+             this, another device whose own stamp for this part is older (or exactly
+             equal, e.g. a rename we both replayed) would look authoritative on the
+             next snapshot merge and quietly undo the sheet's edit. */
+          if (took){
+            changed = true;
+            if (cfgAt > (DB.cfgTouched[key] || 0)) DB.cfgTouched[key] = cfgAt;
           }
         }
       }
@@ -1747,11 +1809,11 @@ function searchShopParts(q){
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
-  function addRow(num, desc, label, thumbIdx){
+  function addRow(num, desc, label, thumbIdx, kind){
     var div = document.createElement("div");
     div.className = "partitem";
     var th = (thumbIdx >= 0 && THUMBS[thumbIdx]) ? '<img class="pthumb" src="'+THUMBS[thumbIdx]+'">' : '';
-    div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+'</span>';
+    div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+fitsTag(kind||"")+'</span>';
     var b = document.createElement("button");
     b.className = "padd"; b.textContent = label || "ADD";
     b.onclick = function(){
@@ -1765,7 +1827,7 @@ function searchShopParts(q){
     div.appendChild(b); res.appendChild(div);
   }
   if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"', -1); return; }
-  for (var h=0;h<hits.length;h++) addRow(hits[h][0], pname(hits[h]), null, hits[h][3]);
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], pname(hits[h]), null, hits[h][3], hits[h][4]);
 }
 function renderShopSelParts(){
   var el = $("sSelParts"); el.innerHTML = "";
@@ -1898,8 +1960,12 @@ function searchParts(q){
   if (q.length < 2) return;
   var hits = [];
   var CAT = epList();
+  /* only offer parts that fit the kart being logged: adult karts see the
+     both/all parts plus adult-only ones, jr karts see both plus jr-only */
+  var jrKart = currentKart ? ((+currentKart) >= 41) : null;
   for (var i=0;i<CAT.length && hits.length<12;i++){
     var p = CAT[i];
+    if (jrKart !== null && !fitsOk(p[4] || "", jrKart)) continue;
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
@@ -1919,7 +1985,7 @@ function searchParts(q){
       var div = document.createElement("div");
       div.className = "partitem";
       var th = (p[3] >= 0 && THUMBS[p[3]]) ? '<img class="pthumb" src="'+THUMBS[p[3]]+'">' : '';
-      div.innerHTML = th + '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(pname(p))+'</span>';
+      div.innerHTML = th + '<span class="pn">'+esc(p[0])+'</span><span class="pd">'+esc(pname(p))+fitsTag(p[4]||"")+'</span>';
       var b = document.createElement("button");
       b.className = "padd"; b.textContent = "ADD";
       b.onclick = function(){ addPart(p[0], pname(p)); };
@@ -2133,16 +2199,20 @@ function searchQpParts(q){
   if (q.length < 2) return;
   var hits = [];
   var CAT = epList();
+  /* a quick pick scoped to adult karts shouldn't offer jr-only parts, and the
+     other way round; an "all karts" one still sees everything */
+  var scopeJr = qpScope === "jr" ? true : (qpScope === "adult" ? false : null);
   for (var i=0;i<CAT.length && hits.length<12;i++){
     var p = CAT[i];
+    if (scopeJr !== null && !fitsOk(p[4] || "", scopeJr)) continue;
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
   }
-  function addRow(num, desc, label, thumbIdx){
+  function addRow(num, desc, label, thumbIdx, kind){
     var div = document.createElement("div");
     div.className = "partitem";
     var th = (thumbIdx >= 0 && THUMBS[thumbIdx]) ? '<img class="pthumb" src="'+THUMBS[thumbIdx]+'">' : '';
-    div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+'</span>';
+    div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(desc)+fitsTag(kind||"")+'</span>';
     var b = document.createElement("button");
     b.className = "padd"; b.textContent = label || "ADD";
     b.onclick = function(){
@@ -2156,7 +2226,7 @@ function searchQpParts(q){
     div.appendChild(b); res.appendChild(div);
   }
   if (!hits.length){ addRow(q, "not in catalog", 'ADD "'+q+'"', -1); return; }
-  for (var h=0;h<hits.length;h++) addRow(hits[h][0], pname(hits[h]), null, hits[h][3]);
+  for (var h=0;h<hits.length;h++) addRow(hits[h][0], pname(hits[h]), null, hits[h][3], hits[h][4]);
 }
 function renderQpSelParts(){
   var el = $("qpSelParts"); el.innerHTML = "";
