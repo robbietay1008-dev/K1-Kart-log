@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.4';
+var LOGIC_VER = 'v8.5';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -42,7 +42,7 @@ function handlePost(e) {
         step('kart tabs', function(){ writeKartTabs(ss, data); });
         step('part config', function(){ mergeCfg(ss, data); });
         step('counts', function(){ scanCounts(ss, data); });
-        step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg); });
+        step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg, data.invCounted || {}); });
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
         saveJson('lastSync', { at: new Date().toISOString(), build: data.appBuild || '', errs: errs });
@@ -210,7 +210,7 @@ function cleanupImpl() {
       step('all dates', function(){ writeAllDates(ss, snap); });
       step('log', function(){ writeLog(ss, snap, photoIndex); });
       step('parts used', function(){ writePartsUsed(ss, snap); });
-      step('inventory qty', function(){ writeInventoryQty(ss, snap.inv, snap.invCfg); });
+      step('inventory qty', function(){ writeInventoryQty(ss, snap.inv, snap.invCfg, snap.invCounted || {}); });
       step('needed', function(){ writeNeeded(ss, snap.inv); });
       step('order view', function(){ ensureOrderView(ss); });
       phase = 1; kartPos = 0;
@@ -614,18 +614,24 @@ function invConfigFromSheet(ss) {
 
 /* ---- write app quantities back into the inventory tab QUANTITY column ----
    Rows are added, removed and renamed by mergeCfg; this only moves numbers. */
-function writeInventoryQty(ss, inv, cfgFromApp) {
+function writeInventoryQty(ss, inv, cfgFromApp, counted) {
   var sh = ss.getSheetByName('inventory');
   if (!sh || !inv) return;
   var last = sh.getLastRow();
   if (last < 2) return;
   var nums = sh.getRange(2, 2, last - 1, 1).getValues();
   var qtys = sh.getRange(2, 4, last - 1, 1).getValues();
+  /* Column E INVENTORIED is the recount checkbox. It is ticked off on the app's
+     INVENTORY screen, and mirrored here so the sheet shows the same thing.
+     RESET in the app empties invCounted, so every box goes back to FALSE. */
+  var ticks = counted ? sh.getRange(2, 5, last - 1, 1).getValues() : null;
   for (var i = 0; i < nums.length; i++) {
     var key = String(nums[i][0] || '').trim().toUpperCase();
     if (key && inv[key] !== undefined) qtys[i][0] = inv[key];
+    if (ticks) ticks[i][0] = !!(key && counted[key]);
   }
   sh.getRange(2, 4, last - 1, 1).setValues(qtys);
+  if (ticks) tryOp(function () { sh.getRange(2, 5, last - 1, 1).setValues(ticks); });
 }
 
 /* ================= v8: two-way part config =================

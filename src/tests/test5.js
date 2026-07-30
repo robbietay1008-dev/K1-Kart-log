@@ -112,7 +112,7 @@ function receiveSnapshot(data) {
     var __ss = SpreadsheetApp.getActiveSpreadsheet();
     mergeCfg(__ss, loadJson('snapshot', null));
     scanCounts(__ss, loadJson('snapshot', null));
-    writeInventoryQty(__ss, __d.inv || {}, __d.invCfg || {});
+    writeInventoryQty(__ss, __d.inv || {}, __d.invCfg || {}, __d.invCounted || {});
   `, sandbox);
 }
 function invAnswer() {
@@ -129,13 +129,15 @@ function snapAnswer() {
   const s = store.snapshot || {};
   return JSON.stringify({ ok: true, karts: s.karts || {}, shop: s.shop || [], inv: s.inv || {},
     invCfg: s.invCfg || {}, tomb: s.tomb || {}, stamps: s.stamps || {},
-    invTouched: s.invTouched || {}, cfgTouched: s.cfgTouched || {},
+    invTouched: s.invTouched || {}, invCounted: s.invCounted || {},
+    cfgTouched: s.cfgTouched || {},
     partTomb: s.partTomb || {}, rekeys: s.rekeys || [], photos: {} });
 }
 function rowsOf() {
   const m = {};
   for (let i = 1; i < sheet._g.length; i++)
-    if (sheet._g[i][1]) m[String(sheet._g[i][1])] = { n: sheet._g[i][2], q: sheet._g[i][3], r: sheet._g[i][5],
+    if (sheet._g[i][1]) m[String(sheet._g[i][1])] = { n: sheet._g[i][2], q: sheet._g[i][3], c: sheet._g[i][4],
+                                                      r: sheet._g[i][5],
                                                       g: sheet._g[i][6], k: sheet._g[i][13] };
   return m;
 }
@@ -508,6 +510,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   ok('the part we do not stock stays blank', cg[3][2] === '', cg[3]);
   r = rowsOf();
   ok('the inventory tab agrees', r['59191'] && r['59191'].q === 17, r['59191']);
+  ok('INVENTORIED ticks itself on the inventory tab', r['59191'].c === true, r['59191']);
+  ok('an uncounted part stays unticked', r['59003'] && r['59003'].c === false, r['59003']);
 
   /* a pull must not undo any of it */
   await A.page.evaluate(() => pullInvConfig());
@@ -523,6 +527,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   });
   await pushA();
   ok('RESET clears the page but not the stock', cg[1][2] === '' && rowsOf()['59191'].q === 17, cg[1]);
+  ok('RESET unticks INVENTORIED too', rowsOf()['59191'].c === false, rowsOf()['59191']);
 
   /* and B picks the cleared checkmarks up */
   await B.page.evaluate(() => syncNow(true));
