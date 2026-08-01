@@ -1338,30 +1338,67 @@ function epList(){
 }
 function partRow(num){ epList(); return EP_INDEX[String(num).toUpperCase()] || null; }
 
-/* ---- which karts a part fits: "A" adult only, "J" jr only, "N" never goes
-   on a kart at all (shop/facility stuff), "" fits both adult and jr ---- */
-var FITS_OPTS = [["","BOTH"],["A","ADULT"],["J","JR"],["N","NOT KART"]];
+/* ---- which karts a part fits ----
+   Any mix of three tags, held as a SET of letters kept in A,J,N order:
+     A  goes on adult karts        J  goes on jr karts
+     N  NOT KART -- shop/facility stock. This one is only a label; it doesn't
+        hide a part by itself. To keep something off the karts, untick A and J.
+   "" is the canonical spelling of adult+jr, so ticking both chips stores blank
+   and the hundreds of parts that were never tagged keep working untouched. */
+var FITS_OPTS = [["A","ADULT"],["J","JR"],["N","NOT KART"]];
+function fitsNorm(set){
+  var s = String(set || ""), out = "";
+  for (var i=0;i<FITS_OPTS.length;i++)
+    if (s.indexOf(FITS_OPTS[i][0]) >= 0) out += FITS_OPTS[i][0];
+  return out === "AJ" ? "" : out;       /* adult+jr is stored blank */
+}
+function fitsHas(set, letter){
+  if (!set) return letter === "A" || letter === "J";   /* blank == adult + jr */
+  return String(set).indexOf(letter) >= 0;
+}
+/* Turning a chip off can empty the set, and an empty set is spelled "" -- which
+   already means adult+jr, so it can't also mean "nowhere". Untick both kart
+   chips and the part lands on NOT KART, which is the tag that means exactly
+   that; untick NOT KART on its own and it goes back to fitting both. Either way
+   at least one chip stays lit, so what you see is always what's stored. */
+function fitsToggle(set, letter){
+  var cur = fitsHas(set, letter), out = "", i;
+  for (i=0;i<FITS_OPTS.length;i++){
+    var L = FITS_OPTS[i][0];
+    var on = (L === letter) ? !cur : fitsHas(set, L);
+    if (on) out += L;
+  }
+  if (out === "") return letter === "N" ? "" : "N";
+  return fitsNorm(out);
+}
 function fitsOk(kind, isJr){
-  if (!kind) return true;               /* blank means it goes on anything */
-  if (kind === "N") return false;       /* never offered for a kart */
-  return isJr ? (kind === "J") : (kind === "A");
+  if (!kind) return true;               /* blank means adult and jr both */
+  return isJr ? (kind.indexOf("J") >= 0) : (kind.indexOf("A") >= 0);
 }
+/* goes on some kart, so it belongs in the log's part search at all. A part
+   tagged only NOT KART fails this; one tagged NOT KART *and* ADULT passes. */
+function fitsAnyKart(kind){ return fitsOk(kind, false) || fitsOk(kind, true); }
+var FITS_COLORS = { A:"#7ab7ff", J:"#ffb74d", N:"#9aa3ad" };
 function fitsTag(kind){
-  if (kind === "A") return ' <span style="color:#7ab7ff;font-weight:800">ADULT</span>';
-  if (kind === "J") return ' <span style="color:#ffb74d;font-weight:800">JR</span>';
-  if (kind === "N") return ' <span style="color:#9aa3ad;font-weight:800">NOT KART</span>';
-  return "";
+  var s = String(kind || ""), out = "", i;
+  for (i=0;i<FITS_OPTS.length;i++){
+    var L = FITS_OPTS[i][0];
+    if (s.indexOf(L) >= 0)
+      out += ' <span style="color:'+FITS_COLORS[L]+';font-weight:800">'+FITS_OPTS[i][1]+'</span>';
+  }
+  return out;
 }
-/* the FITS chips wired to a variable the caller owns, read back through get() */
+/* the FITS chips wired to a variable the caller owns, read back through get().
+   Every chip toggles on its own, so more than one can be lit at a time. */
 function renderFitsChips(rowId, get, set){
   var row = $(rowId); if (!row) return;
   row.innerHTML = "";
   for (var i=0;i<FITS_OPTS.length;i++){
     (function(val, label){
       var c = document.createElement("button");
-      c.className = "chip" + (get() === val ? " on" : "");
+      c.className = "chip" + (fitsHas(get(), val) ? " on" : "");
       c.textContent = label;
-      c.onclick = function(){ set(val); renderFitsChips(rowId, get, set); };
+      c.onclick = function(){ set(fitsToggle(get(), val)); renderFitsChips(rowId, get, set); };
       row.appendChild(c);
     })(FITS_OPTS[i][0], FITS_OPTS[i][1]);
   }
@@ -1454,7 +1491,7 @@ function openInvModal(num){
   $("invENum").value = num;
   $("invERed").value = c ? (c.r || 0) : 0;
   $("invEGreen").value = c ? (c.g || 0) : 0;
-  invEFits = (c && c.k) ? c.k : "";
+  invEFits = fitsNorm(c ? c.k : "");
   renderFitsChips("invEFitsRow", invEFitsGet, invEFitsSet);
   $("invEditWrap").style.display = "none";
   $("btnInvEdit").textContent = "EDIT DETAILS";
@@ -1978,12 +2015,13 @@ function searchParts(q){
   var hits = [];
   var CAT = epList();
   /* only offer parts that fit the kart being logged: adult karts see the
-     both/all parts plus adult-only ones, jr karts see both plus jr-only.
-     NOT KART parts are never offered here even with no kart picked yet. */
+     untagged parts plus anything tagged ADULT, jr karts see untagged plus JR.
+     Something tagged for no kart at all is never offered here, even before a
+     kart has been picked. */
   var jrKart = currentKart ? ((+currentKart) >= 41) : null;
   for (var i=0;i<CAT.length && hits.length<12;i++){
     var p = CAT[i];
-    if ((p[4] || "") === "N") continue;
+    if (!fitsAnyKart(p[4] || "")) continue;
     if (jrKart !== null && !fitsOk(p[4] || "", jrKart)) continue;
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);
@@ -2224,11 +2262,11 @@ function searchQpParts(q){
   var CAT = epList();
   /* a quick pick scoped to adult karts shouldn't offer jr-only parts, and the
      other way round; an "all karts" one still sees everything. quick picks
-     always land on a kart, so NOT KART parts are out of all of them. */
+     always land on a kart, so parts that go on no kart are out of all of them. */
   var scopeJr = qpScope === "jr" ? true : (qpScope === "adult" ? false : null);
   for (var i=0;i<CAT.length && hits.length<12;i++){
     var p = CAT[i];
-    if ((p[4] || "") === "N") continue;
+    if (!fitsAnyKart(p[4] || "")) continue;
     if (scopeJr !== null && !fitsOk(p[4] || "", scopeJr)) continue;
     if (p[0].toUpperCase().indexOf(q) > -1 || pname(p).toUpperCase().indexOf(q) > -1 ||
         p[1].toUpperCase().indexOf(q) > -1 || (p[2] && p[2].toUpperCase().indexOf(q) > -1)) hits.push(p);

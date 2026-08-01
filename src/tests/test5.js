@@ -325,26 +325,45 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(1200);
   ok('and then reaches the sheet', rowsOf()['59191'].n === 'OPTIMA BATTERY RED TOP', rowsOf()['59191']);
 
-  /* ---------- 8. adult / jr / both ---------- */
-  console.log('\n8. FITS — adult, jr or both');
+  /* ---------- 8. FITS tags, any mix of the three ---------- */
+  console.log('\n8. FITS — multi-select tags');
   /* let A catch up first so this section only changes the FITS field */
   await A.page.evaluate(() => pullInvConfig());
   await sleep(1200);
 
+  /* Chips toggle now, so a test can't just click the one it wants — it has to
+     drive the row to a target set. Clicks whichever chips are on the wrong
+     side, then reports what ended up lit. */
+  const setChips = (rowId, want) => A.page.evaluate(([rowId, want]) => {
+    var names = { A: 'ADULT', J: 'JR', N: 'NOT KART' };
+    for (var pass = 0; pass < 5; pass++) {
+      var chips = $(rowId).querySelectorAll('.chip'), moved = false;
+      for (var i = 0; i < chips.length; i++) {
+        var letter = chips[i].textContent === names.A ? 'A' :
+                     chips[i].textContent === names.J ? 'J' : 'N';
+        var isOn = chips[i].className.indexOf('on') > -1;
+        if (isOn !== (want.indexOf(letter) > -1)) { chips[i].click(); moved = true; break; }
+      }
+      if (!moved) break;
+    }
+    var on = $(rowId).querySelectorAll('.chip.on'), out = [];
+    for (var j = 0; j < on.length; j++) out.push(on[j].textContent);
+    return out.join('+');
+  }, [rowId, want]);
+
   await A.page.evaluate(() => { renderInv(); showScreen('scrInv'); });
   await A.page.click('#btnInvAdd');
+  s = await A.page.evaluate(() => {
+    var on = $('naFitsRow').querySelectorAll('.chip.on'), out = [];
+    for (var j = 0; j < on.length; j++) out.push(on[j].textContent);
+    return out.join('+');
+  });
+  ok('a brand new part starts on ADULT+JR', s === 'ADULT+JR', s);
   await A.page.fill('#naNum', 'jrtire1');
   await A.page.fill('#naName', 'jr rear tire');
   await A.page.fill('#naQty', '12');
-  await A.page.evaluate(() => {
-    var chips = $('naFitsRow').querySelectorAll('.chip');
-    for (var i = 0; i < chips.length; i++) if (chips[i].textContent === 'JR') chips[i].click();
-  });
-  s = await A.page.evaluate(() => {
-    var on = $('naFitsRow').querySelectorAll('.chip.on');
-    return on.length === 1 ? on[0].textContent : '(' + on.length + ')';
-  });
-  ok('JR chip selects on its own', s === 'JR', s);
+  s = await setChips('naFitsRow', 'J');
+  ok('unticking ADULT leaves JR on its own', s === 'JR', s);
   await A.page.click('#btnNaSave');
   s = await A.page.evaluate(() => ({ cfg: DB.invCfg['JRTIRE1'], row: partRow('JRTIRE1') }));
   ok('kind stored on the new part', s.cfg && s.cfg.k === 'J', s.cfg);
@@ -354,18 +373,33 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await A.page.evaluate(() => openInvModal('59191'));
   await A.page.click('#btnInvEdit');
   s = await A.page.evaluate(() => {
-    var on = $('invEFitsRow').querySelectorAll('.chip.on');
-    return on.length === 1 ? on[0].textContent : '(' + on.length + ')';
+    var on = $('invEFitsRow').querySelectorAll('.chip.on'), out = [];
+    for (var j = 0; j < on.length; j++) out.push(on[j].textContent);
+    return out.join('+');
   });
-  ok('edit panel starts on BOTH', s === 'BOTH', s);
-  await A.page.evaluate(() => {
-    var chips = $('invEFitsRow').querySelectorAll('.chip');
-    for (var i = 0; i < chips.length; i++) if (chips[i].textContent === 'ADULT') chips[i].click();
-  });
+  ok('an untagged part shows ADULT and JR lit', s === 'ADULT+JR', s);
+  await setChips('invEFitsRow', 'A');
   await A.page.click('#btnInvEditSave');
   s = await A.page.evaluate(() => ({ k: DB.invCfg['59191'].k, n: DB.invCfg['59191'].n }));
   ok('adult-only saved', s.k === 'A', s);
   ok('name untouched by the FITS save', !!s.n, s);
+
+  /* ticking ADULT back on collapses to the blank "both" spelling, so a part
+     that was never tagged is never rewritten just for being opened */
+  await A.page.evaluate(() => openInvModal('59191'));
+  await A.page.click('#btnInvEdit');
+  s = await setChips('invEFitsRow', 'AJ');
+  ok('both chips can be lit at once', s === 'ADULT+JR', s);
+  await A.page.click('#btnInvEditSave');
+  s = await A.page.evaluate(() => DB.invCfg['59191'].k);
+  ok('adult+jr collapses back to blank', !s, s);
+  /* put it back to adult-only for the rest of the section */
+  await A.page.evaluate(() => openInvModal('59191'));
+  await A.page.click('#btnInvEdit');
+  await setChips('invEFitsRow', 'A');
+  await A.page.click('#btnInvEditSave');
+  s = await A.page.evaluate(() => DB.invCfg['59191'].k);
+  ok('back to adult-only', s === 'A', s);
 
   /* the part search on the log form only offers what fits the kart */
   s = await A.page.evaluate(() => {
@@ -424,10 +458,25 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await A.page.fill('#naNum', 'shoprag1');
   await A.page.fill('#naName', 'shop rags box');
   await A.page.fill('#naQty', '6');
+  /* unticking both kart chips is how a part comes off the karts, and it has to
+     land on NOT KART rather than on an empty set that would read as "both" */
+  s = await setChips('naFitsRow', 'N');
+  ok('unticking ADULT and JR lands on NOT KART', s === 'NOT KART', s);
+  s = await A.page.evaluate(() => naFits);
+  ok('and stores as N, not blank', s === 'N', s);
+  /* and it is reversible -- unticking NOT KART goes back to fitting both */
   await A.page.evaluate(() => {
     var chips = $('naFitsRow').querySelectorAll('.chip');
-    for (var i = 0; i < chips.length; i++) if (chips[i].textContent === 'NOT KART') chips[i].click();
+    for (var i = 0; i < chips.length; i++)
+      if (chips[i].textContent === 'NOT KART') chips[i].click();
   });
+  s = await A.page.evaluate(() => {
+    var on = $('naFitsRow').querySelectorAll('.chip.on'), out = [];
+    for (var j = 0; j < on.length; j++) out.push(on[j].textContent);
+    return out.join('+') + '|' + naFits;
+  });
+  ok('unticking NOT KART returns to both', s === 'ADULT+JR|', s);
+  await setChips('naFitsRow', 'N');
   await A.page.click('#btnNaSave');
   s = await A.page.evaluate(() => ({ cfg: DB.invCfg['SHOPRAG1'], row: partRow('SHOPRAG1') }));
   ok('NOT KART stored on the part', s.cfg && s.cfg.k === 'N', s.cfg);
@@ -473,6 +522,82 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     for (const k in b2) if (JSON.stringify(a[k]) !== JSON.stringify(b2[k])) diff[k] = [a[k], b2[k]];
     for (const k in a) if (!(k in b2)) diff[k] = [a[k], null];
     ok('NOT KART does not ping-pong', Object.keys(diff).length === 0, diff);
+  }
+
+  /* ---------- 8b2. tags combine ---------- */
+  console.log('\n8b2. FITS — combinations');
+  /* an adult part that is also shop stock: NOT KART is a label here, it must
+     not take the part off the adult karts by itself */
+  await A.page.evaluate(() => { renderInv(); showScreen('scrInv'); });
+  await A.page.click('#btnInvAdd');
+  await A.page.fill('#naNum', 'zipties1');
+  await A.page.fill('#naName', 'zip ties bag');
+  await A.page.fill('#naQty', '20');
+  s = await setChips('naFitsRow', 'AN');
+  ok('ADULT and NOT KART light together', s === 'ADULT+NOT KART', s);
+  await A.page.click('#btnNaSave');
+  s = await A.page.evaluate(() => ({ cfg: DB.invCfg['ZIPTIES1'], row: partRow('ZIPTIES1') }));
+  ok('the pair is stored in A,J,N order', s.cfg && s.cfg.k === 'AN', s.cfg);
+  ok('the pair reaches the catalog', s.row && s.row[4] === 'AN', s.row);
+
+  s = await A.page.evaluate(() => {
+    var out = {}, keep = currentKart;
+    currentKart = '7';  searchParts('ZIPTIES1'); out.onAdult = $('partResults').textContent;
+    currentKart = '45'; searchParts('ZIPTIES1'); out.onJr = $('partResults').textContent;
+    currentKart = keep;
+    searchShopParts('ZIPTIES1'); out.shop = $('sPartResults').textContent;
+    return out;
+  });
+  ok('ADULT+NOT KART still offered on an adult kart', s.onAdult.indexOf('zip ties') > -1, s.onAdult);
+  ok('ADULT+NOT KART hidden on a jr kart', s.onJr.indexOf('zip ties') === -1, s.onJr);
+  ok('both badges render', s.shop.indexOf('ADULT') > -1 && s.shop.indexOf('NOT KART') > -1, s.shop);
+
+  /* all three at once goes on every kart and still reads as shop stock */
+  await A.page.evaluate(() => openInvModal('ZIPTIES1'));
+  await A.page.click('#btnInvEdit');
+  s = await setChips('invEFitsRow', 'AJN');
+  ok('all three chips light at once', s === 'ADULT+JR+NOT KART', s);
+  await A.page.click('#btnInvEditSave');
+  s = await A.page.evaluate(() => {
+    var out = { k: DB.invCfg['ZIPTIES1'].k }, keep = currentKart;
+    currentKart = '7';  searchParts('ZIPTIES1'); out.onAdult = $('partResults').textContent;
+    currentKart = '45'; searchParts('ZIPTIES1'); out.onJr = $('partResults').textContent;
+    currentKart = keep;
+    return out;
+  });
+  ok('all three stored as AJN', s.k === 'AJN', s.k);
+  ok('AJN shows on an adult kart', s.onAdult.indexOf('zip ties') > -1, s.onAdult);
+  ok('AJN shows on a jr kart', s.onJr.indexOf('zip ties') > -1, s.onJr);
+
+  /* the sheet spells a combination out as a comma list, and reads one back */
+  await A.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  r = rowsOf();
+  ok('a combination lands as a word list', r.ZIPTIES1 && r.ZIPTIES1.k === 'ADULT, JR, NOT KART', r.ZIPTIES1);
+
+  for (let i = 1; i < sheet._g.length; i++)
+    if (String(sheet._g[i][1]) === 'ZIPTIES1') sheet._g[i][13] = 'jr / not kart';
+  await B.page.evaluate(() => pullInvConfig());
+  await sleep(1200);
+  s = await B.page.evaluate(() => DB.invCfg['ZIPTIES1'].k);
+  ok('a hand-typed list comes back as a set', s === 'JN', s);
+
+  /* "ADULT, JR" typed by hand is the same thing as leaving the cell empty */
+  for (let i = 1; i < sheet._g.length; i++)
+    if (String(sheet._g[i][1]) === 'JRTIRE1') sheet._g[i][13] = 'ADULT, JR';
+  await B.page.evaluate(() => pullInvConfig());
+  await sleep(1200);
+  s = await B.page.evaluate(() => DB.invCfg['JRTIRE1'].k);
+  ok('a typed ADULT, JR normalises to blank', !s, s);
+
+  const beforeCombo = JSON.stringify(rowsOf());
+  await B.page.evaluate(() => syncNow(true));
+  await sleep(1200);
+  {
+    const a = JSON.parse(beforeCombo), b2 = rowsOf(), diff = {};
+    for (const k in b2) if (JSON.stringify(a[k]) !== JSON.stringify(b2[k])) diff[k] = [a[k], b2[k]];
+    for (const k in a) if (!(k in b2)) diff[k] = [a[k], null];
+    ok('combinations do not ping-pong', Object.keys(diff).length === 0, diff);
   }
 
   /* ---------- 8c. the paper count sheet fills in from the app ---------- */

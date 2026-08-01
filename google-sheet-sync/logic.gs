@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.6';
+var LOGIC_VER = 'v8.7';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -701,21 +701,44 @@ function sameCfg(a, b) {
 }
 
 /* ---- FITS column (N): which karts a part goes on ----
-   Stored in the app as 'A' (adult only), 'J' (jr only), 'N' (never on a kart --
-   shop/facility stock) or '' (fits both adult and jr), and typed on the sheet as
-   a word. Anything unrecognised reads as "both", so an empty column on 400-odd
-   existing rows means nothing changes for them. */
+   A part can carry any mix of three tags, so this is a SET of letters rather
+   than one letter: 'A' adult, 'J' jr, 'N' not-kart (shop/facility stock -- a
+   label now, it no longer hides a part from the kart lists on its own). The
+   letters are always kept in A,J,N order so two equal sets compare equal as
+   plain strings.
+
+   The empty string is the canonical spelling of "adult and jr", which is why
+   'AJ' normalises back to ''. That keeps the 400-odd rows with a blank FITS
+   cell meaning exactly what they always meant, with nothing rewritten.
+
+   On the sheet the tags are typed as words separated by commas ("ADULT, JR"),
+   and only the first letter of each word is read, so "adult/jr", "Adult and Jr"
+   and the retired single word "BOTH" all still land somewhere sensible. */
+var FITS_LETTERS = 'AJN';
 function normKind(v) {
   var s = String(v === null || v === undefined ? '' : v).trim().toUpperCase();
   if (!s) return '';
-  var c = s.charAt(0);
-  if (c === 'A') return 'A';
-  if (c === 'J') return 'J';
-  if (c === 'N') return 'N';   /* NOT KART -- shop/facility part, never on a kart */
-  return '';
+  var words = s.split(/[^A-Z]+/), got = {}, out = '', i;
+  for (i = 0; i < words.length; i++) {
+    var w = words[i];
+    if (!w || w === 'AND') continue;
+    var c = w.charAt(0);
+    if (FITS_LETTERS.indexOf(c) >= 0) got[c] = 1;
+  }
+  for (i = 0; i < FITS_LETTERS.length; i++)
+    if (got[FITS_LETTERS.charAt(i)]) out += FITS_LETTERS.charAt(i);
+  return out === 'AJ' ? '' : out;      /* adult+jr is stored blank */
+}
+function kindWord(c) {
+  return c === 'A' ? 'ADULT' : (c === 'J' ? 'JR' : (c === 'N' ? 'NOT KART' : ''));
 }
 function kindLabel(k) {
-  return k === 'A' ? 'ADULT' : (k === 'J' ? 'JR' : (k === 'N' ? 'NOT KART' : 'BOTH'));
+  var s = String(k || ''), out = [], i;
+  for (i = 0; i < s.length; i++) {
+    var w = kindWord(s.charAt(i));
+    if (w) out.push(w);
+  }
+  return out.join(', ');               /* '' stays blank -- it means adult + jr */
 }
 
 /* make sure column N exists and is labelled before we write into it */
