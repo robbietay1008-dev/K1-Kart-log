@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.5';
+var LOGIC_VER = 'v8.6';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -253,7 +253,7 @@ function writeKartTabsChunk(ss, data, startIdx, deadline, errs) {
       rows.push(['', '', '', '', kd.knotes || '', st.chain || '', st.diff || '', st.brake || '',
                  st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '', st.weld || 0]);
       var es = (kd.entries || []).slice().sort(function (a, b) {
-        return (new Date(a.date) - new Date(b.date)) || 0;
+        return cmpKey(entryKey(a.date), entryKey(b.date));   /* oldest first */
       });
       for (var j = 0; j < es.length; j++) {
         var en = es[j];
@@ -351,6 +351,30 @@ function savePhoto(data) {
   index[data.id] = ss.getUrl() + '#gid=' + sh.getSheetId() + '&range=C' + row;
   saveJson('photo_index', index);
 }
+
+/* ---- sorting log entries by date ----
+   Entry dates are typed by hand and a few old rows have no date at all.
+   `new Date('')` is an Invalid Date, and every comparison against NaN comes
+   back false, so the old comparators answered inconsistently for those rows —
+   the sort then left APP LOG in several separate newest-first runs and a brand
+   new entry could land in the middle of the tab instead of on top. Turning the
+   date into a plain number first, with undated rows pinned to "oldest", keeps
+   the ordering total so the sort can't scramble. */
+function entryKey(s) {
+  var t = String(s === null || s === undefined ? '' : s).trim();
+  if (t) {
+    var m = t.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+    if (m) {
+      var y = +m[3];
+      return new Date(y < 100 ? 2000 + y : y, +m[1] - 1, +m[2]).getTime();
+    }
+    var n = new Date(t).getTime();
+    if (n === n) return n;
+  }
+  return -Infinity;                 /* no usable date -> sorts as oldest */
+}
+/* -Infinity minus -Infinity is NaN, so compare rather than subtract */
+function cmpKey(a, b) { return a < b ? -1 : (a > b ? 1 : 0); }
 
 /* ================= date helpers for coloring ================= */
 function parseAnyDate(s) {
@@ -482,7 +506,7 @@ function writeKartTabs(ss, data) {
     rows.push(['', '', '', '', kd.knotes || '', st.chain || '', st.diff || '', st.brake || '',
                st.bat1 || '', st.bat2 || '', st.bat3 || '', st.bat4 || '', st.weld || 0]);
     var es = (kd.entries || []).slice().sort(function (a, b) {
-      return (new Date(a.date) - new Date(b.date)) || 0;
+      return cmpKey(entryKey(a.date), entryKey(b.date));   /* oldest first */
     });
     for (var j = 0; j < es.length; j++) {
       var en = es[j];
@@ -529,10 +553,15 @@ function writeLog(ss, data, photoIndex) {
                 en.mechanic || '', en.notes || '', photoCell(en.photos, photoIndex)]);
     }
   }
+  /* newest first, undated rows at the bottom; the original position is carried
+     along as a last tie-break so two entries logged the same day on the same
+     kart keep a fixed order instead of shuffling on every rebuild */
+  for (var q = 0; q < all.length; q++) all[q].push(q);
   all.sort(function (a, b) {
-    var d = new Date(b[0]) - new Date(a[0]);   // newest first
-    return d || ((+a[1]) - (+b[1]));
+    return cmpKey(entryKey(b[0]), entryKey(a[0])) ||
+           ((+a[1]) - (+b[1])) || (a[7] - b[7]);
   });
+  for (var q2 = 0; q2 < all.length; q2++) all[q2].pop();
   rows = rows.concat(all);
   sh.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
   sh.getRange(1, 1, 1, rows[0].length).setFontWeight('bold');
