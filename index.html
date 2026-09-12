@@ -175,7 +175,13 @@
     display:flex; align-items:center; background:#242938; border-radius:10px;
     padding:8px 10px; margin-bottom:6px; font-size:15px;
   }
-  .selpart .spn { font-weight:800; flex:1; }
+  /* number on top, name underneath. No flex `gap` — the shop iPad's Safari is
+     too old for it, so the spacing is a margin. min-width:0 lets a long name
+     wrap instead of shoving the qty buttons off the row. */
+  .selpart .spn { flex:1; min-width:0; }
+  .selpart .spnum { font-weight:800; display:block; }
+  .selpart .spname { display:block; margin-top:1px; font-size:12px; font-weight:600;
+    color:#9aa3b5; line-height:1.25; word-wrap:break-word; }
   .qbtn { background:#2f3546; color:#fff; border:none; border-radius:8px; width:42px; height:42px; font-size:20px; font-weight:800; }
   .qnum { width:40px; text-align:center; font-weight:800; font-size:17px; }
   .sprem { background:none; border:none; color:#ff5f6b; font-size:20px; padding:6px 10px; }
@@ -534,7 +540,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0801-0414";
+var APP_BUILD = "0912-1505";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1889,7 +1895,7 @@ function renderShopSelParts(){
     (function(sp){
       var div = document.createElement("div");
       div.className = "selpart";
-      var lbl = document.createElement("span"); lbl.className="spn"; lbl.textContent = sp.num;
+      var lbl = document.createElement("span"); lbl.className="spn"; lbl.innerHTML = selPartLabel(sp);
       var minus = document.createElement("button"); minus.className="qbtn"; minus.textContent="−";
       minus.onclick = function(){ if(sp.qty>1){sp.qty--; renderShopSelParts();} };
       var qn = document.createElement("span"); qn.className="qnum"; qn.textContent = "x"+sp.qty;
@@ -2060,6 +2066,25 @@ function addPart(num, desc){
   $("partResults").innerHTML = "";
   renderSelParts();
 }
+/* ---- the label on a part that's already been picked ----
+   These rows used to show the part number alone. That reads fine in the search
+   results, where the name is sitting right next to it, but not once the part is
+   down in the picked list -- "059534" doesn't tell you it's an m6 locknut.
+
+   The name is looked up from the catalog at render time rather than read off the
+   row, for two reasons: quick picks pre-fill from a parts STRING ("059534 x2")
+   through parsePartsString, so those rows carry no name at all; and a part
+   renamed since it was picked should show the name it has now. `desc`, which
+   only the search-result ADD button sets, is the fallback for something that
+   isn't in the catalog. A part whose name IS its number prints once, not twice. */
+function selPartLabel(sp){
+  var row = partRow(sp.num);
+  var nm = row ? pname(row) : (sp.desc || "");
+  var out = '<span class="spnum">' + esc(sp.num) + '</span>';
+  if (nm && nm.toUpperCase() !== String(sp.num).toUpperCase())
+    out += '<span class="spname">' + esc(nm) + '</span>';
+  return out;
+}
 function renderSelParts(){
   var el = $("selParts"); el.innerHTML = "";
   for (var i=0;i<selectedParts.length;i++){
@@ -2067,7 +2092,7 @@ function renderSelParts(){
       var div = document.createElement("div");
       div.className = "selpart";
       var lbl = document.createElement("span");
-      lbl.className = "spn"; lbl.textContent = sp.num;
+      lbl.className = "spn"; lbl.innerHTML = selPartLabel(sp);
       var minus = document.createElement("button");
       minus.className="qbtn"; minus.textContent="−";
       minus.onclick = function(){ if(sp.qty>1){sp.qty--; renderSelParts();} };
@@ -2297,7 +2322,7 @@ function renderQpSelParts(){
     (function(sp){
       var div = document.createElement("div");
       div.className = "selpart";
-      var lbl = document.createElement("span"); lbl.className="spn"; lbl.textContent = sp.num;
+      var lbl = document.createElement("span"); lbl.className="spn"; lbl.innerHTML = selPartLabel(sp);
       var minus = document.createElement("button"); minus.className="qbtn"; minus.textContent="−";
       minus.onclick = function(){ if(sp.qty>1){sp.qty--; renderQpSelParts();} };
       var qn = document.createElement("span"); qn.className="qnum"; qn.textContent = "x"+sp.qty;
