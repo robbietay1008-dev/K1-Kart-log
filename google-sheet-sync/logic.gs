@@ -7,9 +7,10 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.7';
+var LOGIC_VER = 'v8.9';
 
 var COUNT_TAB = 'APP COUNT SHEET';
+var BAT_TAB = 'BATTERY TRACKING';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -32,7 +33,8 @@ function handlePost(e) {
                                invCounted: data.invCounted || {},
                                invCfg: data.invCfg || {}, parts: data.parts || [],
                                cfgTouched: data.cfgTouched || {},
-                               partTomb: data.partTomb || {}, rekeys: data.rekeys || [] });
+                               partTomb: data.partTomb || {}, rekeys: data.rekeys || [],
+                               bat: data.bat || {} });
         var photoIndex = loadJson('photo_index', {});
         var errs = [];
         function step(name, fn){ try { fn(); SpreadsheetApp.flush(); } catch (err2) { errs.push(name + ': ' + err2); } }
@@ -45,6 +47,7 @@ function handlePost(e) {
         step('inventory qty', function(){ writeInventoryQty(ss, data.inv, data.invCfg, data.invCounted || {}); });
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
+        step('batteries', function(){ writeBatteryTab(ss, data); });
         saveJson('lastSync', { at: new Date().toISOString(), build: data.appBuild || '', errs: errs });
         return txt(errs.length ? 'ok with errors: ' + errs.join(' | ') : 'ok');
       }
@@ -73,6 +76,7 @@ function handleGet(e) {
                                    cfgTouched: snap ? (snap.cfgTouched || {}) : {},
                                    partTomb: snap ? (snap.partTomb || {}) : {},
                                    rekeys: snap ? (snap.rekeys || []) : [],
+                                   bat: snap ? (snap.bat || {}) : {},
                                    photos: photoIndex });
     return ContentService.createTextOutput(cb + '(' + payload + ')')
       .setMimeType(ContentService.MimeType.JAVASCRIPT);
@@ -122,6 +126,7 @@ function handleGet(e) {
     step3('karttabs', function () { writeKartTabs(ss3, snap3); });
     step3('needed', function () { writeNeeded(ss3, snap3.inv); });
     step3('orderview', function () { ensureOrderView(ss3); });
+    step3('batteries', function () { writeBatteryTab(ss3, snap3); });
     /* record the outcome so the app's health check reflects reality —
        a stale failure would otherwise keep warning about a fixed problem */
     saveJson('lastSync', { at: new Date().toISOString(),
@@ -213,6 +218,7 @@ function cleanupImpl() {
       step('inventory qty', function(){ writeInventoryQty(ss, snap.inv, snap.invCfg, snap.invCounted || {}); });
       step('needed', function(){ writeNeeded(ss, snap.inv); });
       step('order view', function(){ ensureOrderView(ss); });
+      step('batteries', function(){ writeBatteryTab(ss, snap); });
       phase = 1; kartPos = 0;
     }
     var doneAll = false;
@@ -1162,4 +1168,83 @@ function scanCounts(ss, snap) {
   if (dirty) sh.getRange(2, 1, rows.length, COUNT_HDR.length).setValues(rows);
   SpreadsheetApp.flush();
   return filled;
+}
+
+/* ================= BATTERY TRACKING — the corporate paper, filled in by the app =================
+   The K1 "Battery Tracking Sheet" (Center / Date Received, then 30 numbered rows of
+   Serial Number / Kart Number / Date Used / Initials) is drawn on this tab in the
+   same layout so it prints straight from Sheets. Rows come from the app's BATTERIES
+   screen, where each Optima's factory barcode is scanned in: snap.bat is
+   { id: {sn, kart, date (YYYY-MM-DD), ini, c: created ms, at: edited ms} }.
+   One way only, app -> sheet, in scan order. Center and Date Received are typed
+   on the tab by hand and survive every redraw. */
+var BAT_HDR = ['Battery', 'Serial Number', 'Kart Number', 'Date Used', 'Initials'];
+var BAT_MIN_ROWS = 30;      /* the paper has 30 lines; more batteries just add rows */
+
+function batUS(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  if (!m) return String(iso || '');
+  return (+m[2]) + '/' + (+m[3]) + '/' + m[1];
+}
+function batList(snap) {
+  var bat = (snap && snap.bat) || {}, tomb = (snap && snap.tomb) || {}, out = [];
+  for (var id in bat) {
+    var b = bat[id];
+    if (!b || tomb[id] || !b.sn) continue;
+    out.push({ sn: String(b.sn), kart: b.kart === undefined || b.kart === null ? '' : String(b.kart),
+               date: batUS(b.date), ini: String(b.ini || ''), c: +b.c || 0, id: id });
+  }
+  out.sort(function (a, b) { return a.c - b.c || (a.id < b.id ? -1 : 1); });
+  return out;
+}
+function writeBatteryTab(ss, snap) {
+  var list = batList(snap);
+  var sh = ss.getSheetByName(BAT_TAB);
+  var fresh = !sh;
+  if (!sh) sh = ss.insertSheet(BAT_TAB);
+  /* keep what was typed into the two header blanks */
+  var center = '', received = '';
+  if (!fresh && String(sh.getRange(1, 1).getValue() || '').trim() === 'Center:') {
+    center = sh.getRange(1, 2).getValue();
+    received = sh.getRange(1, 5).getValue();
+  }
+  var n = Math.max(BAT_MIN_ROWS, list.length);
+  var rows = [];
+  rows.push(['Center:', center, '', 'Date Received:', received]);
+  rows.push(['Battery Tracking Sheet', '', '', '', '']);
+  rows.push(BAT_HDR.slice());
+  for (var i = 0; i < n; i++) {
+    var b = list[i];
+    rows.push([i + 1, b ? b.sn : '', b ? b.kart : '', b ? b.date : '', b ? b.ini : '']);
+  }
+  tryOp(function () { sh.clearContents(); });
+  if (sh.getMaxRows() < rows.length) sh.insertRowsAfter(sh.getMaxRows(), rows.length - sh.getMaxRows());
+  /* serials and dates are text so 6180409549 never turns into 6.18E+09 */
+  tryOp(function () { sh.getRange(4, 2, n, 4).setNumberFormat('@'); });
+  tryOp(function () { sh.getRange(1, 2).setNumberFormat('@'); sh.getRange(1, 5).setNumberFormat('@'); });
+  sh.getRange(1, 1, rows.length, 5).setValues(rows);
+  /* the paper's look: title band, bold headers, boxed table, no gridlines */
+  tryOp(function () {
+    sh.getRange(1, 1, 1, 5).setFontWeight('bold').setFontSize(11);
+    sh.getRange(1, 1).setHorizontalAlignment('right');
+    sh.getRange(1, 4).setHorizontalAlignment('right');
+    sh.getRange(1, 2).setBorder(null, null, true, null, null, null);
+    sh.getRange(1, 5).setBorder(null, null, true, null, null, null);
+    var title = sh.getRange(2, 1, 1, 5);
+    try { title.merge(); } catch (em) {}
+    title.setFontWeight('bold').setFontSize(20).setHorizontalAlignment('center')
+         .setVerticalAlignment('middle').setBackground('#d9d9d9');
+    sh.getRange(3, 1, 1, 5).setFontWeight('bold').setFontSize(11).setHorizontalAlignment('center');
+    sh.getRange(4, 1, n, 1).setFontWeight('bold');
+    sh.getRange(4, 1, n, 5).setHorizontalAlignment('center').setFontSize(11);
+    sh.getRange(2, 1, n + 2, 5).setBorder(true, true, true, true, true, true);
+    sh.getRange(2, 1, 1, 5).setBorder(true, true, true, true, null, null, '#000000', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+    sh.setRowHeight(1, 30); sh.setRowHeight(2, 46); sh.setRowHeight(3, 26);
+    for (var r = 4; r < 4 + n; r++) sh.setRowHeight(r, 24);
+    sh.setColumnWidth(1, 70); sh.setColumnWidth(2, 300); sh.setColumnWidth(3, 120);
+    sh.setColumnWidth(4, 120); sh.setColumnWidth(5, 95);
+    sh.setHiddenGridlines(true);
+  });
+  SpreadsheetApp.flush();
+  return list.length;
 }
