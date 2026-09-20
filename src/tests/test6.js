@@ -358,7 +358,10 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.evaluate(() => { const id = batBySn('6180407777'); DB.tomb[id] = Date.now(); delete DB.bat[id]; save(); });
   await push(A); await pull(B);
   ok('deletion propagates to B', await B.page.evaluate(() => batBySn('6180407777')) === null);
-  ok('the now-empty 9/26 tab is gone', !batTab('BATTERIES 09-26-2026'));
+  { const e = batTab('BATTERIES 09-26-2026');
+    ok('the emptied 9/26 tab stays as a blank paper with its date', !!e && e[0][4] === '9/26/2026' && e[3][1] === '' && e[32][0] === 30, e && e.slice(0,4)); }
+  { const f = batTab('BATTERIES FORM');
+    ok('a blank FORM tab is always present', !!f && f[1][0] === 'Battery Tracking Sheet' && f[0][4] === '' && f[0][1] === 'Arlington' && f[3][1] === '', f && f.slice(0,4)); }
   { const tt = batTab('BATTERIES 09-19-2026'); const sns = tt.slice(3).map(r => r[1]).filter(Boolean);
     ok('9/19 tab keeps its batteries, 7777 gone, no gaps', sns.indexOf('6180400002') > -1 && sns.indexOf('6180407777') === -1 && tt[3 + sns.length][1] === '', sns); }
 

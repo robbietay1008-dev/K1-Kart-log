@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.10';
+var LOGIC_VER = 'v8.11';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -1184,6 +1184,7 @@ function scanCounts(ss, snap) {
    One way only, app -> sheet. Center (B1) is typed by hand once and copied to
    every battery tab from then on. */
 var BAT_PREFIX = 'BATTERIES ';
+var BAT_FORM_TAB = 'BATTERIES FORM';   /* the blank paper, always present */
 var BAT_HDR = ['Battery', 'Serial Number', 'Kart Number', 'Date Used', 'Initials'];
 var BAT_MIN_ROWS = 30;      /* the paper has 30 lines; a bigger pallet just adds rows */
 
@@ -1234,9 +1235,15 @@ function writeBatteryTab(ss, snap) {
     drawBatteryPage(sh, g.groups[key], center, batUS(key));
     total += g.groups[key].length;
   }
-  /* a received date that no longer has any batteries (all deleted) loses its tab;
-     tabs Robbie has already printed are unaffected because their batteries stay */
-  for (var old in have) if (!wanted[old]) tryOp(function () { ss.deleteSheet(have[old]); });
+  /* a tab, once made, stays: an emptied pallet keeps its (now blank) paper and the
+     blank FORM tab is always there to print */
+  for (var old in have) {
+    if (wanted[old] || old === BAT_FORM_TAB) continue;
+    var keepDate = String(have[old].getRange(1, 5).getValue() || '');
+    drawBatteryPage(have[old], [], center, keepDate);
+  }
+  var form = have[BAT_FORM_TAB] || ss.insertSheet(BAT_FORM_TAB);
+  drawBatteryPage(form, [], center, '');
   SpreadsheetApp.flush();
   return total;
 }
