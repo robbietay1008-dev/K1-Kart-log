@@ -269,6 +269,23 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('the old BAT 2 came out and its history says so', s.kart === '' && s.pos === '' && s.h.length === 2 && s.h[1].out === '12', s);
   ok('kart page: BAT 1 = 0001, BAT 2 = 5554', await A.page.evaluate(() => $('batRow').children[0].textContent.indexOf('6180400001') > -1 && $('batRow').children[1].textContent.indexOf('6180405554') > -1));
 
+  /* batteries already in a kart are not offered to another kart; stock = shelf count */
+  await A.page.evaluate(() => openKart('7'));
+  await A.page.click('#btnLog');
+  await A.page.fill('#fDate', '2026-09-21');
+  await A.page.fill('#fAction', 'battery');
+  await A.page.evaluate(() => { selectedParts.push({ num: '59191', qty: 1 }); renderSelParts(); selectedMech = 'ROBERT'; renderMechRow(); });
+  await A.page.click('#btnSaveLog');
+  await sleep(150);
+  s = await A.page.evaluate(() => Array.from($('batUseList').children).map(r => r.textContent));
+  ok('kart 7 popup offers only shelf batteries (9549 + 7777), not the two in kart 12', s.length === 2 && s.join(' ').indexOf('6180405554') === -1 && s.join(' ').indexOf('6180400001') === -1, s);
+  await A.page.type('#batUseScan', '6180405554');
+  await A.page.keyboard.press('Enter');
+  ok('scanning a serial that is in kart 12 is refused', await A.page.evaluate(() => Object.keys(batUse.sel).length === 0) && (await toast(A)).indexOf('is in kart 12') > -1, await toast(A));
+  await A.page.click('#btnBatUseSkip');
+  ok('59191 stock equals the shelf count (2)', await A.page.evaluate(() => DB.inv['59191']) === 2, await A.page.evaluate(() => DB.inv['59191']));
+  await A.page.evaluate(() => openKart('12'));
+
   /* a log with no battery does not pop */
   await A.page.click('#btnLog');
   await A.page.fill('#fDate', '2026-09-21');

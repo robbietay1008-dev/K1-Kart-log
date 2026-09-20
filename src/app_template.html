@@ -783,6 +783,7 @@ function load(){
 }
 function save(){
   epBust();   /* the pickable parts catalog is derived from invCfg/partTomb */
+  if (DB && DB.bat) batSyncInv();
   try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); }
   catch(e){ toast("SAVE FAILED — storage full?"); }
   scheduleSync();
@@ -999,6 +1000,7 @@ function mergeRemote(r){
     }
   }
   for (var bd in DB.bat){ if (DB.tomb[bd]){ delete DB.bat[bd]; changed = true; } }
+  if (changed) batSyncInv();
   /* receipt-applied + photo link unions */
   var rrc = r.rc || {};
   for (var rid in rrc){ if (!DB.meta.rcApplied[rid]){ DB.meta.rcApplied[rid] = 1; changed = true; } }
@@ -1175,6 +1177,15 @@ function batForKart(k){
   for (var i=0;i<list.length;i++) if (String(list[i].b.kart) === String(k)) out.push(list[i].b.sn);
   return out;
 }
+var BAT_PART = "59191";
+/* the batteries on the shelf ARE the battery inventory: once anything has been
+   scanned in, stock for 59191 is the count of serials not in a kart */
+function batSyncInv(){
+  var any = false, shelf = 0;
+  for (var id in DB.bat){ var b = DB.bat[id]; if (!b || !b.sn) continue; any = true; if (!b.kart) shelf++; }
+  if (!any) return;
+  if (DB.inv[BAT_PART] !== shelf){ DB.inv[BAT_PART] = shelf; DB.invTouched[BAT_PART] = Date.now(); }
+}
 function batAtPos(k, pos){
   for (var id in DB.bat){ var b = DB.bat[id]; if (b && String(b.kart) === String(k) && +b.pos === +pos) return b.sn; }
   return "";
@@ -1342,12 +1353,12 @@ function renderBatUse(){
   var el = $("batUseList"); el.innerHTML = "";
   var list = batSorted(), n = 0;
   var q = batClean($("batUseScan").value);
-  /* on-the-shelf batteries first, then whatever is already selected */
-  for (var pass=0; pass<2; pass++){
+  /* only shelf batteries (and ones already in this kart) are offered — a
+     battery in another kart has to be pulled there first */
+  for (var pass=0; pass<1; pass++){
     for (var i=list.length-1; i>=0; i--){
       var id = list[i].id, b = list[i].b, on = !!batUse.sel[id];
-      var shelf = !b.kart || b.kart === batUse.kart;
-      if (pass === 0 ? !shelf : (shelf || !on)) continue;
+      if (b.kart && b.kart !== batUse.kart) continue;
       if (q && !on && b.sn.indexOf(q) === -1) continue;
       n++;
       (function(id, b, on){
@@ -1357,7 +1368,6 @@ function renderBatUse(){
         div.innerHTML = '<span class="pn">' + (on ? "&#10003;" : "&nbsp;&nbsp;") + '</span><span class="pd">' +
           '<span style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>' +
           ' &middot; rcvd ' + esc(isoToUS(b.rcv) || "?") +
-          (b.kart && b.kart !== batUse.kart ? ' &middot; <span style="color:#ff8a80">in kart ' + esc(b.kart) + '</span>' : '') +
           (b.kart === batUse.kart ? ' &middot; <span style="color:#4caf7a">already this kart</span>' : '') + '</span>';
         div.onclick = function(){ if (batUse.sel[id]){ delete batUse.sel[id]; delete batUse.pos[id]; } else { batUse.sel[id] = 1; $("batUseScan").value = ""; } renderBatUse(); };
         el.appendChild(div);
@@ -1398,7 +1408,8 @@ function batUseScanAdd(){
     id = batCreate(sn, todayISO());
     save();
   } else if (DB.bat[id].kart && DB.bat[id].kart !== batUse.kart){
-    if (!confirm(sn + " is logged in kart " + DB.bat[id].kart + ".\nMove it to kart " + batUse.kart + "?")){ inp.focus(); return; }
+    toast(sn + " is in kart " + DB.bat[id].kart + " — take it out of that kart first (Batteries screen)", true);
+    inp.focus(); return;
   }
   batUse.sel[id] = 1;
   renderBatUse(); inp.focus();
