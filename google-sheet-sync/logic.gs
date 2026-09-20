@@ -1223,6 +1223,9 @@ function writeBatteryTab(ss, snap) {
     if (!center && String(existing[e].getRange(1, 1).getValue() || '').trim() === 'Center:')
       center = existing[e].getRange(1, 2).getValue();
   }
+  /* the single-tab layout from the first cut (9/19) is superseded by the per-date tabs */
+  var legacy = ss.getSheetByName('BATTERY TRACKING');
+  if (legacy) tryOp(function () { ss.deleteSheet(legacy); });
   var wanted = {}, total = 0;
   for (var i = 0; i < g.keys.length; i++) {
     var key = g.keys[i], name = batTabName(key);
