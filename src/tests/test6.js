@@ -474,8 +474,18 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.type('#scScan', '999999');
   await sleep(400);
   ok('unknown number is refused and stays in scan mode', await A.page.evaluate(() => sc === null && $('scHint').textContent.indexOf('No part numbered') === 0));
+  /* tally mode: a label on each piece, every scan is one */
+  await A.page.evaluate(() => { const c = Array.from($('scModeRow').children); c[1].click(); });
+  ok('tally mode selected and remembered', await A.page.evaluate(() => DB.meta.scMode === 'tally'));
+  for (let i = 0; i < 3; i++) { await A.page.type('#scScan', '59014'); await sleep(320); }
+  ok('three scans of 59014 tally to 3', await A.page.evaluate(() => scTally && scTally.num === '59014' && scTally.n === 3 && $('scTVal').textContent === '3'));
+  await A.page.click('#btnScTMinus');
+  ok('minus one fixes a double-trigger', await A.page.evaluate(() => scTally.n === 2));
+  await A.page.type('#scScan', 'SAK-6011'); await sleep(320);
+  ok('a different part saves 59014 = 2 and starts SAK-6011 at 1', await A.page.evaluate(() => DB.inv['59014'] === 2 && DB.invCounted['59014'] === 1 && scTally.num === 'SAK-6011' && scTally.n === 1));
   await A.page.click('#btnScDone');
-  ok('done closes it', await A.page.evaluate(() => $('scanCountModal').className === 'modal'));
+  ok('done saves the last tally and closes', await A.page.evaluate(() => DB.inv['SAK-6011'] === 1 && $('scanCountModal').className === 'modal'));
+  await A.page.evaluate(() => { DB.meta.scMode = 'bin'; saveQuiet(); });
 
   /* ---------- 5. restore path ---------- */
   console.log('\n5. fresh device restores from the sheet');
