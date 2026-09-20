@@ -189,6 +189,13 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.type('#batScan', '123');
   await A.page.keyboard.press('Enter');
   ok('a 3-digit scan is rejected', await A.page.evaluate(() => batSorted().length) === 2);
+  /* a scanner with no suffix at all: two serials typed back to back, no Enter */
+  await A.page.type('#batScan', '61804011116180402222');
+  s = await A.page.evaluate(() => ({ n: batSorted().length, sns: batSorted().map(x => x.b.sn), box: $('batScan').value }));
+  ok('10 digits are taken automatically, twice, no Enter needed', s.n === 4 && s.sns.indexOf('6180401111') > -1 && s.sns.indexOf('6180402222') > -1 && s.box === '', s);
+  await A.page.type('#batScan', '6180403333 ');
+  ok('a space suffix works too', await A.page.evaluate(() => batSorted().length) === 5 && await A.page.evaluate(() => $('batScan').value) === '');
+  await A.page.evaluate(() => { ['6180401111','6180402222','6180403333'].forEach(sn => { const id = batBySn(sn); DB.tomb[id] = Date.now(); delete DB.bat[id]; }); save(); });
   await A.page.click('#btnBatBatchDone');
   ok('DONE closes the popup and the list shows both', await A.page.evaluate(() => $('batBatchModal').className === 'modal' && $('batList').children.length === 2));
   ok('rows say "on the shelf"', /on the shelf/.test(await A.page.textContent('#batList')));

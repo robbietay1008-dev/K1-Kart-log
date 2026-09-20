@@ -627,7 +627,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0920-1045";
+var APP_BUILD = "0920-1057";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1230,6 +1230,21 @@ function batClean(v){
   return String(v||"").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 var batBatch = null;   /* ids scanned in the open batch popup */
+var BAT_SN_LEN = 10;   /* Optima serials are 10 digits — a scan is complete without any Enter */
+/* the scanner may send Enter, Tab, a space, or nothing at all after the barcode.
+   Whatever arrives, once a full serial is in the box it is taken; anything typed
+   after it stays in the box as the start of the next one. */
+function batAutoTake(inp, fn){
+  var raw = String(inp.value || "");
+  if (/[\s\r\n\t]/.test(raw) && batClean(raw).length){ inp.value = batClean(raw); fn(); return; }
+  var clean = batClean(raw);
+  if (clean.length >= BAT_SN_LEN){
+    var rest = clean.slice(BAT_SN_LEN);
+    inp.value = clean.slice(0, BAT_SN_LEN);
+    fn();
+    if (rest){ inp.value = rest; batAutoTake(inp, fn); }
+  }
+}
 function batFocusScan(){ setTimeout(function(){ try { if (batBatch) $("batScan").focus(); } catch(e){} }, 30); }
 function openBatBatch(){
   batBatch = [];
@@ -1343,8 +1358,9 @@ $("btnBack5").onclick = function(){ showScreen("scrHome"); renderHome(); };
 $("btnBatAdd").onclick = batAddFromScan;
 $("batScan").addEventListener("keydown", function(ev){
   var k = ev.keyCode || ev.which;
-  if (k === 13 || k === 9){ ev.preventDefault(); batAddFromScan(); }
+  if (k === 13 || k === 9 || k === 32){ ev.preventDefault(); batAddFromScan(); }
 });
+$("batScan").addEventListener("input", function(){ batAutoTake($("batScan"), batAddFromScan); });
 $("batSearch").addEventListener("input", renderBat);
 $("btnBatCancel").onclick = function(){ $("batModal").className = "modal"; batModalId = null; };
 $("batKart").addEventListener("input", renderBatPosRow);
@@ -1464,8 +1480,9 @@ $("btnBatUseAdd").onclick = batUseScanAdd;
 $("batUseScan").addEventListener("input", renderBatUse);
 $("batUseScan").addEventListener("keydown", function(ev){
   var k = ev.keyCode || ev.which;
-  if (k === 13 || k === 9){ ev.preventDefault(); batUseScanAdd(); }
+  if (k === 13 || k === 9 || k === 32){ ev.preventDefault(); batUseScanAdd(); }
 });
+$("batUseScan").addEventListener("input", function(){ batAutoTake($("batUseScan"), batUseScanAdd); });
 $("btnBatUseSave").onclick = function(){
   if (!batUse) return;
   var ids = [], k; for (k in batUse.sel) ids.push(k);
