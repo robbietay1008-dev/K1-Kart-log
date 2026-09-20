@@ -483,6 +483,37 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.click('#btnScDone');
   ok('done submits the open part (1) and closes', await A.page.evaluate(() => DB.inv['59014'] === 1 && $('scanCountModal').className === 'modal'));
 
+  /* ---------- 4c. one scan = one part taken ---------- */
+  console.log('\n4c. pull parts by scanning');
+  await A.page.evaluate(() => { showScreen('scrHome'); renderHome(); DB.inv['59014'] = 20; DB.inv['SAK-6011'] = 10; DB.meta.scanMech = ''; saveQuiet(); renderPullBar(); });
+  const scan = async (code) => { await A.page.keyboard.type(code); await sleep(320); };
+  await scan('K1-MECH-ROBERT');
+  ok('badge scan sets the mechanic', await A.page.evaluate(() => DB.meta.scanMech === 'ROBERT' && $('pullBar').textContent.indexOf('ROBERT') > -1));
+  await scan('059014'); await scan('59014'); await scan('SAK-6011');
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], b: DB.inv['SAK-6011'], pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').map(e => e.parts + '|' + e.mechanic) }));
+  ok('three scans: 59014 x2, SAK-6011 x1 pulled, stock dropped now', s.a === 18 && s.b === 9 && s.pulls.length === 1 && s.pulls[0] === '59014 x2, SAK-6011 x1|ROBERT', s);
+  await scan('K1-UNDO');
+  s = await A.page.evaluate(() => ({ b: DB.inv['SAK-6011'], p: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts }));
+  ok('undo puts the last one back', s.b === 10 && s.p === '59014 x2', s);
+  /* logging the work on a kart with those parts does not take stock twice */
+  await A.page.evaluate(() => openKart('7'));
+  await A.page.click('#btnLog');
+  await A.page.fill('#fDate', '2026-09-21');
+  await A.page.fill('#fAction', 'brake cables');
+  await A.page.evaluate(() => { selectedParts.push({ num: '59014', qty: 3 }); renderSelParts(); selectedMech = 'ROBERT'; renderMechRow(); });
+  await A.page.click('#btnSaveLog');
+  await sleep(120);
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').length, e: DB.karts['7'].entries[DB.karts['7'].entries.length - 1].parts }));
+  ok('log of 59014 x3: 2 came from the pull, only 1 more leaves stock; pull entry consumed', s.a === 17 && s.pulls === 0 && s.e === '59014 x3', s);
+  /* a scan while a popup is open is NOT a pull */
+  await A.page.evaluate(() => { showScreen('scrHome'); renderHome(); $('btnInv').click(); });
+  await A.page.click('#btnInvScan'); await sleep(100);
+  await scan('59014');
+  ok('inside scan-count a part scan counts, it does not pull', await A.page.evaluate(() => sc && sc.num === '59014' && DB.inv['59014'] === 17));
+  await scan('K1-CANCEL');
+  ok('K1-CANCEL closes scan-count', await A.page.evaluate(() => $('scanCountModal').className === 'modal'));
+  await A.page.evaluate(() => openKart('12'));
+
   /* ---------- 5. restore path ---------- */
   console.log('\n5. fresh device restores from the sheet');
   const C = await device(browser, 'C');

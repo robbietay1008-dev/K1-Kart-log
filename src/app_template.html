@@ -211,6 +211,9 @@
     <button class="hbtn" id="btnInv" style="width:100%; min-height:54px; border:1px dashed #4a5674; margin-top:8px">&#128230; INVENTORY &amp; STOCK</button>
     <button class="hbtn" id="btnBat" style="width:100%; min-height:54px; border:1px dashed #4a5674; margin-top:8px">&#128267; BATTERY SCAN-IN</button>
   </div>
+  <div style="padding:10px 14px 0">
+    <div id="pullBar" class="partitem" style="display:none; cursor:default"></div>
+  </div>
   <div class="sectionlabel">ADULT KARTS</div>
   <div class="grid" id="gridAdult"></div>
   <div class="sectionlabel">JUNIOR KARTS</div>
@@ -1349,6 +1352,7 @@ var BAT_SN_LEN = 10;   /* Optima serials are 10 digits — a scan is complete wi
    after it stays in the box as the start of the next one. */
 function batAutoTake(inp, fn){
   var raw = String(inp.value || "");
+  if (scanIsCode(raw)) return;
   if (/[\s\r\n\t]/.test(raw) && batClean(raw).length){ inp.value = batClean(raw); fn(); return; }
   var clean = batClean(raw);
   if (clean.length >= BAT_SN_LEN){
@@ -1392,6 +1396,7 @@ function renderBatBatch(){
 }
 function batAddFromScan(){
   var inp = $("batScan");
+  if (scanIsCode(inp.value)) return;
   var sn = batClean(inp.value);
   inp.value = "";
   if (!sn){ batFocusScan(); return; }
@@ -1653,7 +1658,8 @@ function renderBatUse(){
   $("btnBatUseSave").textContent = "SAVE" + (c ? " (" + c + (batUse.qty > 1 ? " of " + batUse.qty : "") + ")" : "");
 }
 function batUseScanAdd(){
-  var inp = $("batUseScan"), sn = batClean(inp.value); inp.value = "";
+  var inp = $("batUseScan"); if (scanIsCode(inp.value)) return;
+  var sn = batClean(inp.value); inp.value = "";
   if (!sn){ inp.focus(); return; }
   if (sn.length < 6){ toast("That doesn't look like a serial: " + sn, true); inp.focus(); return; }
   var id = batBySn(sn);
@@ -1807,6 +1813,7 @@ function daysSince(s){
 /* ================= HOME ================= */
 var currentKart = null;
 function renderHome(){
+  renderPullBar();
   renderGrid("gridAdult", ADULT_KARTS, false);
   renderGrid("gridJr", JR_KARTS, true);
 }
@@ -2286,6 +2293,149 @@ var invModalNum = null;
 var invEFits = "";
 function invEFitsGet(){ return invEFits; }
 function invEFitsSet(v){ invEFits = v; }
+/* ================= SCAN ROUTER =================
+   The scanner is a keyboard; a fast burst of keys is a scan. Command labels
+   (K1-MECH-<NAME>, K1-COUNT, K1-RECV, K1-DONE, K1-CANCEL, K1-UNDO) work from
+   anywhere. A plain part number scanned on the home screen = one taken. */
+var scanBuf = "", scanLast = 0, scanTimer = null;
+function scanIsCode(v){ return /^K1-/i.test(String(v || "").trim()); }
+function anyModalOpen(){ return !!document.querySelector(".modal.open"); }
+document.addEventListener("keydown", function(ev){
+  var k = ev.key, now = Date.now();
+  if (now - scanLast > 120) scanBuf = "";
+  scanLast = now;
+  if (k && k.length === 1) scanBuf += k;
+  clearTimeout(scanTimer);
+  scanTimer = setTimeout(function(){
+    var burst = scanBuf; scanBuf = "";
+    var m = /K1-[A-Z0-9\-]+$/i.exec(burst);
+    if (m){
+      var code = m[0].toUpperCase();
+      var ae = document.activeElement;
+      if (ae && ae.value !== undefined){          /* the keys landed in a box — take them back out */
+        var v = String(ae.value), i = v.toUpperCase().lastIndexOf(code);
+        if (i > -1) ae.value = v.slice(0, i) + v.slice(i + code.length);
+      }
+      scanCommand(code); return;
+    }
+    /* a part number scanned with nothing open = pulled off the shelf */
+    if (burst.length >= 4 && !anyModalOpen() && $("scrHome").className.indexOf("active") > -1){
+      var num = scMatchPart(burst);
+      if (num) pullPart(num);
+      else toast("Not a part number: " + burst, true);
+    }
+  }, 200);
+}, true);
+function scanCommand(code){
+  var m;
+  if (code === "K1-COUNT"){ $("btnInv").click(); openScanCount(); return; }
+  if (code === "K1-RECV"){ $("btnBat").click(); openBatBatch(); return; }
+  if (code === "K1-UNDO"){ pullUndo(); return; }
+  if (code === "K1-DONE" || code === "K1-CANCEL"){
+    var done = code === "K1-DONE";
+    if ($("scanCountModal").className.indexOf("open") > -1) $("btnScDone").click();
+    else if ($("batBatchModal").className.indexOf("open") > -1) $(done ? "btnBatBatchDone" : "btnBatBatchCancel").click();
+    else if ($("batUseModal").className.indexOf("open") > -1) $(done ? "btnBatUseSave" : "btnBatUseSkip").click();
+    return;
+  }
+  if ((m = /^K1-MECH-(.+)$/.exec(code))){
+    var name = m[1].replace(/-/g, " ");
+    if (DB.mechanics.indexOf(name) === -1) DB.mechanics.push(name);
+    DB.meta.scanMech = name; save(); renderPullBar();
+    toast("Scanning as " + name);
+    return;
+  }
+  toast("Unknown command " + code, true);
+}
+
+/* ================= PULLED PARTS (one scan = one taken) ================= */
+var PULL_TAG = "PULLED (scanned)";
+var lastPull = null;   /* { num, mech } for UNDO */
+function pullEntryFor(mech, dateUS, make){
+  for (var i=DB.shop.length-1;i>=0;i--){
+    var e = DB.shop[i];
+    if (e.usedFor === PULL_TAG && e.date === dateUS && (e.mechanic || "") === (mech || "")) return e;
+  }
+  if (!make) return null;
+  var ne = { id: newEntryId(), date: dateUS, usedFor: PULL_TAG, parts: "", mechanic: mech || "" };
+  DB.shop.push(ne); return ne;
+}
+function partsAdd(str, num, delta){
+  /* "59014 x2, SAK-6011 x1" +/- one part; drops the part at 0 */
+  var items = parsePartsString(str), out = [], hit = false;
+  for (var i=0;i<items.length;i++){
+    var q = items[i].qty;
+    if (items[i].num.toUpperCase() === num.toUpperCase()){ q += delta; hit = true; }
+    if (q > 0) out.push(items[i].num + " x" + q);
+  }
+  if (!hit && delta > 0) out.push(num + " x" + delta);
+  return out.join(", ");
+}
+function pullPart(num){
+  var mech = DB.meta.scanMech || "";
+  var e = pullEntryFor(mech, isoToUS(todayISO()), true);
+  e.parts = partsAdd(e.parts, num, 1);
+  if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - 1); DB.invTouched[num] = Date.now(); }
+  lastPull = { num: num, mech: mech };
+  save(); renderPullBar();
+  var p = partRow(num);
+  toast(num + (p ? " " + pname(p) : "") + "  \u22121  \u00b7 stock " + (DB.inv[num] !== undefined ? DB.inv[num] : "?"));
+}
+function pullUndo(){
+  if (!lastPull){ toast("Nothing to undo", true); return; }
+  var e = pullEntryFor(lastPull.mech, isoToUS(todayISO()), false);
+  if (e){
+    e.parts = partsAdd(e.parts, lastPull.num, -1);
+    if (!e.parts){ DB.shop.splice(DB.shop.indexOf(e), 1); DB.tomb[e.id] = Date.now(); }
+    if (DB.inv[lastPull.num] !== undefined){ DB.inv[lastPull.num] += 1; DB.invTouched[lastPull.num] = Date.now(); }
+  }
+  toast("Undid " + lastPull.num);
+  lastPull = null; save(); renderPullBar();
+}
+/* a kart log that lists parts pulled earlier today (or the last few days) takes
+   them off the pull entry instead of taking stock a second time */
+function reconcilePulls(partsStr, mech){
+  var items = parsePartsString(partsStr), remaining = [];
+  var cutoff = Date.now() - 7*86400000;
+  for (var i=0;i<items.length;i++){
+    var need = items[i].qty, num = items[i].num.toUpperCase();
+    for (var pass=0; pass<2 && need>0; pass++){
+      for (var j=DB.shop.length-1; j>=0 && need>0; j--){
+        var e = DB.shop[j];
+        if (e.usedFor !== PULL_TAG) continue;
+        if (pass === 0 ? (e.mechanic || "") !== (mech || "") : (e.mechanic || "") === (mech || "")) continue;
+        var d = new Date(e.date); if (!isNaN(d) && d.getTime() < cutoff) continue;
+        var have = 0, its = parsePartsString(e.parts);
+        for (var k=0;k<its.length;k++) if (its[k].num.toUpperCase() === num) have = its[k].qty;
+        if (!have) continue;
+        var take = Math.min(have, need);
+        e.parts = partsAdd(e.parts, num, -take); need -= take;
+        if (!e.parts){ DB.tomb[e.id] = Date.now(); DB.shop.splice(j, 1); }
+      }
+    }
+    if (need > 0) remaining.push(items[i].num + " x" + need);
+  }
+  return remaining.join(", ");   /* what still has to come out of stock */
+}
+function renderPullBar(){
+  var bar = $("pullBar"); if (!bar) return;
+  var mech = DB.meta.scanMech || "";
+  bar.style.display = "flex";
+  bar.innerHTML = '<span class="pd">' + (mech ? 'Scanning as <b style="color:#fff">' + esc(mech) + '</b>' : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>') +
+    (lastPull ? ' &middot; last: ' + esc(lastPull.num) + ' \u22121' : '') +
+    ' <small style="color:#667; display:block">Scan a bin here = 1 taken. It drops stock now and rides onto the kart when the work gets logged.</small></span>' +
+    (lastPull ? '<button class="hbtn" id="btnPullUndo" style="min-height:40px; padding:6px 12px; font-size:14px">UNDO</button>' : '') +
+    '<button class="hbtn" id="btnPullMech" style="min-height:40px; padding:6px 12px; font-size:14px; margin-left:8px">' + (mech ? "CHANGE" : "WHO?") + '</button>';
+  var u = $("btnPullUndo"); if (u) u.onclick = pullUndo;
+  $("btnPullMech").onclick = function(){
+    var v = prompt("Who is pulling parts? (" + DB.mechanics.join(", ") + ")", mech);
+    if (v === null) return;
+    v = v.trim().toUpperCase();
+    if (v && DB.mechanics.indexOf(v) === -1) DB.mechanics.push(v);
+    DB.meta.scanMech = v; save(); renderPullBar();
+  };
+}
+
 /* ================= SCAN-COUNT MODE ================= */
 var sc = null;        /* { num, val, typed } — the part that's up; null when nothing is */
 var scTimer = null;
@@ -2337,6 +2487,7 @@ function scSubmit(){
 }
 function scTake(){
   var raw = $("scScan").value;
+  if (scanIsCode(raw)) return;
   $("scScan").value = "";
   if (!String(raw).trim()){ scSubmit(); scFocus(); return; }   /* bare Enter = submit */
   var num = scMatchPart(raw);
@@ -2821,7 +2972,7 @@ function saveShopLog(){
   }
   DB.shop.push({ id: newEntryId(), date: isoToUS(dateISO), usedFor: usedFor,
                  parts: partsStr, mechanic: shopMech });
-  applyInvDelta(partsStr, -1);
+  applyInvDelta(reconcilePulls(partsStr, shopMech), -1);
   save();
   $("shopModal").className = "modal";
   renderShop();
@@ -3031,7 +3182,7 @@ function saveLog(){
     entry.photos.push(pendingPhotos[p].id);
   }
   DB.karts[currentKart].entries.push(entry);
-  applyInvDelta(entry.parts, -1);
+  applyInvDelta(reconcilePulls(entry.parts, selectedMech), -1);
   /* auto updates */
   var st = DB.karts[currentKart].status;
   var ups = detectAutoUpdates(action);
