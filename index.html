@@ -369,7 +369,7 @@
     <div class="mtitle" id="batUseTitle">Batteries into Kart</div>
     <p style="color:#9aa3b5; font-size:13px; margin-bottom:8px" id="batUseHint">Scan the barcode on each battery that went in, or tap it in the list.</p>
     <div style="display:flex">
-      <input type="text" class="in" id="batUseScan" placeholder="Scan serial, then Enter" autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
+      <input type="text" class="in" id="batUseScan" placeholder="Scan, or type part of the serial to search" autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
       <button class="hbtn" id="btnBatUseAdd" style="min-height:48px; padding:0 14px">ADD</button>
     </div>
     <div id="batUseList" style="margin-top:8px; max-height:34vh; overflow:auto"></div>
@@ -612,7 +612,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0919-1603";
+var APP_BUILD = "0920-1025";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1341,12 +1341,14 @@ function openBatUse(kart, dateISO, qty){
 function renderBatUse(){
   var el = $("batUseList"); el.innerHTML = "";
   var list = batSorted(), n = 0;
+  var q = batClean($("batUseScan").value);
   /* on-the-shelf batteries first, then whatever is already selected */
   for (var pass=0; pass<2; pass++){
     for (var i=list.length-1; i>=0; i--){
       var id = list[i].id, b = list[i].b, on = !!batUse.sel[id];
       var shelf = !b.kart || b.kart === batUse.kart;
       if (pass === 0 ? !shelf : (shelf || !on)) continue;
+      if (q && !on && b.sn.indexOf(q) === -1) continue;
       n++;
       (function(id, b, on){
         var div = document.createElement("div");
@@ -1357,7 +1359,7 @@ function renderBatUse(){
           ' &middot; rcvd ' + esc(isoToUS(b.rcv) || "?") +
           (b.kart && b.kart !== batUse.kart ? ' &middot; <span style="color:#ff8a80">in kart ' + esc(b.kart) + '</span>' : '') +
           (b.kart === batUse.kart ? ' &middot; <span style="color:#4caf7a">already this kart</span>' : '') + '</span>';
-        div.onclick = function(){ if (batUse.sel[id]){ delete batUse.sel[id]; delete batUse.pos[id]; } else batUse.sel[id] = 1; renderBatUse(); };
+        div.onclick = function(){ if (batUse.sel[id]){ delete batUse.sel[id]; delete batUse.pos[id]; } else { batUse.sel[id] = 1; $("batUseScan").value = ""; } renderBatUse(); };
         el.appendChild(div);
         if (on){
           var pr = document.createElement("div");
@@ -1382,7 +1384,7 @@ function renderBatUse(){
       })(id, b, on);
     }
   }
-  if (!n) el.innerHTML = '<div style="color:#667;padding:12px;text-align:center">Nothing on the shelf — scan the serial to add it</div>';
+  if (!n) el.innerHTML = '<div style="color:#667;padding:12px;text-align:center">' + (q ? "No serial with \"" + esc(q) + "\" — finish typing it and press Enter to add it" : "Nothing on the shelf — scan the serial to add it") + '</div>';
   var c = 0; for (var k in batUse.sel) c++;
   $("btnBatUseSave").textContent = "SAVE" + (c ? " (" + c + (batUse.qty > 1 ? " of " + batUse.qty : "") + ")" : "");
 }
@@ -1402,6 +1404,7 @@ function batUseScanAdd(){
   renderBatUse(); inp.focus();
 }
 $("btnBatUseAdd").onclick = batUseScanAdd;
+$("batUseScan").addEventListener("input", renderBatUse);
 $("batUseScan").addEventListener("keydown", function(ev){
   var k = ev.keyCode || ev.which;
   if (k === 13 || k === 9){ ev.preventDefault(); batUseScanAdd(); }
