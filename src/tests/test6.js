@@ -453,6 +453,30 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   { const tt = batTab('BATTERIES 09-19-2026'); const sns = tt.slice(3).map(r => r[1]).filter(Boolean);
     ok('9/19 tab keeps its batteries, 7777 gone, no gaps', sns.indexOf('6180400002') > -1 && sns.indexOf('6180407777') === -1 && tt[3 + sns.length][1] === '', sns); }
 
+  /* ---------- 4b. scan-count mode on the inventory screen ---------- */
+  console.log('\n4b. scan count');
+  await A.page.evaluate(() => { DB.invCfg['59014'] = DB.invCfg['59014'] || { n: 'cable brake', r: 10, g: 20 }; DB.inv['59014'] = 20; delete DB.invCounted['59014']; DB.invCfg['SAK-6011'] = DB.invCfg['SAK-6011'] || { n: 'medium com tire 11x6', r: 20, g: 60 }; DB.inv['SAK-6011'] = 54; epBust(); saveQuiet(); $('btnInv').click(); });
+  await A.page.click('#btnInvScan');
+  await sleep(100);
+  ok('scan-count popup open, scan box focused', await A.page.evaluate(() => $('scanCountModal').className === 'modal open' && document.activeElement === $('scScan')));
+  await A.page.type('#scScan', '059014');      /* label with a leading zero, no Enter */
+  await sleep(400);
+  ok('leading-zero label finds the part and shows the pad', await A.page.evaluate(() => sc && sc.num === '59014' && $('scPartWrap').style.display === 'block' && $('scNow').textContent.indexOf('now 20') === 0));
+  await A.page.evaluate(() => { const b = Array.from($('scPad').children); const press = t => b.find(x => x.textContent === t).click(); press('1'); press('7'); });
+  ok('pad types 17', await A.page.evaluate(() => $('scVal').textContent === '17'));
+  await A.page.click('#btnScSet');
+  await sleep(120);
+  ok('count saved as counted, back to the scan box', await A.page.evaluate(() => DB.inv['59014'] === 17 && DB.invCounted['59014'] === 1 && sc === null && $('scScanWrap').style.display === 'block' && document.activeElement === $('scScan')));
+  await A.page.type('#scScan', 'SAK-6011');
+  await A.page.keyboard.press('Enter');
+  ok('alphanumeric part number with Enter works too', await A.page.evaluate(() => sc && sc.num === 'SAK-6011'));
+  await A.page.click('#btnScSkip');
+  await A.page.type('#scScan', '999999');
+  await sleep(400);
+  ok('unknown number is refused and stays in scan mode', await A.page.evaluate(() => sc === null && $('scHint').textContent.indexOf('No part numbered') === 0));
+  await A.page.click('#btnScDone');
+  ok('done closes it', await A.page.evaluate(() => $('scanCountModal').className === 'modal'));
+
   /* ---------- 5. restore path ---------- */
   console.log('\n5. fresh device restores from the sheet');
   const C = await device(browser, 'C');
