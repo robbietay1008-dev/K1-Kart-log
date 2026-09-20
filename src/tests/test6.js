@@ -326,6 +326,24 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('59191 stock equals the shelf count (2: new 7777 + used 8888)', await A.page.evaluate(() => DB.inv['59191']) === 2, await A.page.evaluate(() => DB.inv['59191']));
   await A.page.evaluate(() => openKart('12'));
 
+  /* catch-up: scan the serial of a battery already sitting in a kart, from the kart page */
+  await A.page.evaluate(() => openKart('20'));
+  const DB_bd = await A.page.evaluate(() => DB.karts['20'].status.bat3 || '');
+  await A.page.evaluate(() => $('batRow').children[2].click());
+  await sleep(100);
+  ok('tapping BAT 3 opens the slot editor with the stamped date', await A.page.evaluate(() => $('slotModal').className === 'modal open' && $('slotTitle').textContent === 'BAT 3 — Kart 20' && $('slotDate').value === DB.karts['20'].status.bat3));
+  await A.page.type('#slotSn', '6180406666');
+  await A.page.click('#btnSlotSave');
+  s = await A.page.evaluate(() => { const id = batBySn('6180406666'); return DB.bat[id]; });
+  ok('caught-up battery: in kart 20 BAT 3, no received date, flagged no-form, date code from the kart', s && s.kart === '20' && s.pos === '3' && s.nf === 1 && s.rcv === '' && s.bd === DB_bd, [s, DB_bd]);
+  ok('kart page shows it under BAT 3', await A.page.evaluate(() => $('batRow').children[2].textContent.indexOf('6180406666') > -1));
+  await A.page.evaluate(() => { showScreen('scrBat'); renderBat(); });
+  ok('it is not on any form card', (await A.page.textContent('#batForms')).indexOf('no date') === -1 && await A.page.evaluate(() => Array.from($('batForms').children).every(c => c.textContent.indexOf('Caught') === -1)));
+  await push(A);
+  ok('no "(no date)" tab on the sheet for it', !tabs['BATTERIES (no date)']);
+  ok('but it is in the BATTERY LOG as caught up', tabs['BATTERY LOG']._g.some(r => r[1] === '6180406666' && String(r[4]).indexOf('caught up') === 0));
+  await A.page.evaluate(() => openKart('12'));
+
   /* a log with no battery does not pop */
   await A.page.click('#btnLog');
   await A.page.fill('#fDate', '2026-09-21');
@@ -408,7 +426,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   console.log('\n4. device B pulls, edits, and the two merge');
   await pull(B);
   s = await B.page.evaluate(() => batSorted().map(x => x.b.sn));
-  ok('B sees all five', s.length === 5, s);
+  ok('B sees all six', s.length === 6, s);
   await B.page.evaluate(() => { const id = batBySn('6180409549'); DB.bat[id].kart = '7'; DB.bat[id].at = Date.now() + 5; save(); });
   await push(B);
   await pull(A);
@@ -440,7 +458,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   const C = await device(browser, 'C');
   await C.page.evaluate(() => { DB.bat = {}; saveQuiet(); });
   await pull(C);
-  ok('restored device has the batteries', await C.page.evaluate(() => batSorted().length) === 5);
+  ok('restored device has the batteries', await C.page.evaluate(() => batSorted().length) === 6);
 
   /* ---------- 6. more than 30 on one pallet just adds rows ---------- */
   console.log('\n6. beyond the paper\'s 30 lines');

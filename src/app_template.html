@@ -369,6 +369,23 @@
   </div>
 </div>
 
+<!-- one battery slot on a kart: its stamped date and its serial -->
+<div class="modal" id="slotModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle" id="slotTitle">BAT 1 — Kart 1</div>
+    <label class="f">BATTERY DATE (stamped, e.g. 8-24)</label>
+    <input type="text" class="in" id="slotDate" placeholder="e.g. 8-24" autocapitalize="off">
+    <label class="f" style="margin-top:10px">SERIAL NUMBER</label>
+    <input type="text" class="in" id="slotSn" placeholder="Scan or type the serial" autocapitalize="off" autocorrect="off" style="font-size:18px">
+    <p style="color:#9aa3b5; font-size:12px; margin:6px 0 0">Catching up a battery that's already in the kart? Just scan it here &mdash; it's tracked from now on without going on a form.</p>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnSlotClear" style="flex:1; margin-right:10px; color:#ff8a80; border-color:#7a2a2a">Clear serial</button>
+      <button class="hbtn" id="btnSlotCancel" style="flex:1; margin-right:10px">Cancel</button>
+      <button class="hbtn red" id="btnSlotSave" style="flex:1">SAVE</button>
+    </div>
+  </div>
+</div>
+
 <!-- step 2 of the kart popup: what happens to the batteries coming out -->
 <div class="modal" id="batOldModal">
   <div class="mcard" style="min-height:auto; border-radius:18px; margin:40px 14px 0;">
@@ -1037,9 +1054,10 @@ function mergeRemote(r){
         changed = true; continue;
       }
       DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || "", bd: rbe.bd || "", st: rbe.st || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: rbe.at || 0, h: rbe.h || [] };
+      if (rbe.nf) DB.bat[bid].nf = 1;
       bySn[rbe.sn] = bid; changed = true;
     } else if ((rbe.at || 0) > (lbe.at || 0)){
-      lbe.sn = rbe.sn; lbe.rcv = rbe.rcv || ""; lbe.bd = rbe.bd || ""; lbe.st = rbe.st || ""; lbe.kart = rbe.kart || ""; lbe.pos = rbe.pos || ""; lbe.date = rbe.date || ""; lbe.ini = rbe.ini || ""; lbe.at = rbe.at;
+      lbe.sn = rbe.sn; lbe.rcv = rbe.rcv || ""; lbe.bd = rbe.bd || ""; lbe.st = rbe.st || ""; if (rbe.nf) lbe.nf = 1; else delete lbe.nf; lbe.kart = rbe.kart || ""; lbe.pos = rbe.pos || ""; lbe.date = rbe.date || ""; lbe.ini = rbe.ini || ""; lbe.at = rbe.at;
       changed = true;
     }
     /* history is a union: an event is identified by its timestamp */
@@ -1364,9 +1382,10 @@ function batCreate(sn, rcv, bd){
 }
 function batNumber(id){
   var me = DB.bat[id]; if (!me) return "?";
+  if (me.nf) return "–";
   var list = batSorted(), n = 0;
   for (var i=0;i<list.length;i++){
-    if ((list[i].b.rcv||"") !== (me.rcv||"")) continue;
+    if (list[i].b.nf || (list[i].b.rcv||"") !== (me.rcv||"")) continue;
     n++;
     if (list[i].id === id) return n;
   }
@@ -1376,6 +1395,7 @@ function renderBatForms(){
   var el = $("batForms"); el.innerHTML = "";
   var list = batSorted(), groups = {}, keys = [];
   for (var i=0;i<list.length;i++){
+    if (list[i].b.nf) continue;                 /* caught up in a kart: not on any form */
     var r = list[i].b.rcv || "";
     if (!groups[r]){ groups[r] = { n:0, done:0 }; keys.push(r); }
     groups[r].n++;
@@ -1432,7 +1452,7 @@ function renderBat(){
       if (!b.kart) div.style.borderColor = "#8a6d1d";
       div.innerHTML = '<span class="pn">#'+batNumber(id)+'</span><span class="pd">' +
         '<span style="font-size:17px; font-weight:800; color:#fff; letter-spacing:1px">'+esc(b.sn)+'</span><br>' +
-        'Rcvd ' + esc(isoToUS(b.rcv) || "?") + (b.bd ? ' &middot; ' + esc(b.bd) : '') + ' &middot; ' +
+        (b.nf ? 'Caught up (no form)' : 'Rcvd ' + esc(isoToUS(b.rcv) || "?")) + (b.bd ? ' &middot; ' + esc(b.bd) : '') + ' &middot; ' +
         (b.kart ? 'Kart <b style="color:#fff">'+esc(String(b.kart))+'</b>' + (b.pos ? ' BAT ' + esc(String(b.pos)) : '') + ' &middot; ' + esc(isoToUS(b.date) || "no date") + ' &middot; ' + (b.ini ? esc(b.ini) : '<span style="color:#ffc857">no initials</span>')
                 : b.st === "bad" ? '<span style="color:#ff8a80; font-weight:700">BAD — scrap pile</span>'
                 : b.st === "used" ? '<span style="color:#ffc857; font-weight:700">on the shelf (USED)</span>'
@@ -1817,8 +1837,8 @@ function renderKart(){
       d.style.border = "1px solid #384060"; d.style.background="#242938"; d.style.color="#fff";
       var snp = batAtPos(currentKart, j+1);
       d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>" +
-        (snp ? '<small style="display:block; font-size:11px; color:#c9d2e3; letter-spacing:.5px">'+esc(snp)+'</small>' : '');
-      d.onclick = function(){ editTextField(f, label + " date (e.g. 10-25)"); };
+        '<small style="display:block; font-size:11px; color:' + (snp ? '#c9d2e3' : '#667') + '; letter-spacing:.5px">' + (snp ? esc(snp) : 'no serial') + '</small>';
+      d.onclick = function(){ openSlotModal(f, j+1, label); };
       brow.appendChild(d);
     })(BAT_FIELDS[j][0], BAT_FIELDS[j][1], j);
   }
@@ -1898,6 +1918,61 @@ function editTextField(f, label){
   if (v === null) return;
   st[f] = v.trim(); DB.stamps.karts[currentKart] = Date.now(); save(); renderKart();
 }
+
+/* ---- one slot on a kart: date code + serial (also the catch-up path for batteries
+   that were in karts before scanning started: they get no received date and no form) ---- */
+var slotEdit = null;
+function openSlotModal(f, pos, label){
+  slotEdit = { f: f, pos: pos };
+  var st = DB.karts[currentKart].status;
+  $("slotTitle").textContent = label + " — Kart " + currentKart;
+  $("slotDate").value = st[f] || "";
+  $("slotSn").value = batAtPos(currentKart, pos) || "";
+  $("slotModal").className = "modal open";
+}
+$("slotSn").addEventListener("input", function(){
+  var c = batClean($("slotSn").value);
+  if (c.length > BAT_SN_LEN) c = c.slice(-BAT_SN_LEN);
+  if (c !== $("slotSn").value) $("slotSn").value = c;
+});
+$("slotSn").addEventListener("keydown", function(ev){ var k = ev.keyCode || ev.which; if (k === 13 || k === 9 || k === 32) ev.preventDefault(); });
+$("btnSlotCancel").onclick = function(){ $("slotModal").className = "modal"; slotEdit = null; };
+$("btnSlotClear").onclick = function(){
+  if (!slotEdit) return;
+  var cur = batAtPos(currentKart, slotEdit.pos);
+  if (cur){
+    var id = batBySn(cur);
+    var cond = confirm("Take " + cur + " out of BAT " + slotEdit.pos + ".\n\nOK = still good (used pile)\nCancel = bad (scrap)") ? "used" : "bad";
+    batPull(id, cond, todayISO(), DB.meta.batIni || "");
+  }
+  $("slotModal").className = "modal"; slotEdit = null;
+  save(); renderKart(); toast("Slot cleared");
+};
+$("btnSlotSave").onclick = function(){
+  if (!slotEdit) return;
+  var st = DB.karts[currentKart].status;
+  var dateCode = String($("slotDate").value || "").trim();
+  var sn = batClean($("slotSn").value);
+  var cur = batAtPos(currentKart, slotEdit.pos);
+  if (sn && sn.length < 6){ toast("That doesn't look like a serial", true); return; }
+  if (sn && sn !== cur){
+    var id = batBySn(sn);
+    if (id && DB.bat[id].kart && DB.bat[id].kart !== String(currentKart)){
+      if (!confirm(sn + " is logged in kart " + DB.bat[id].kart + ". Move it here?")) return;
+    }
+    if (!id){
+      /* already in the kart before scanning started: no received date, no form */
+      id = batCreate(sn, "", dateCode);
+      DB.bat[id].nf = 1; DB.bat[id].rcv = "";
+    } else if (!DB.bat[id].bd && dateCode) DB.bat[id].bd = dateCode;
+    if (DB.bat[id].bd && !dateCode) dateCode = DB.bat[id].bd;
+    batAssign(id, String(currentKart), String(slotEdit.pos), todayISO(), DB.meta.batIni || "", "used");
+  }
+  st[slotEdit.f] = dateCode; DB.stamps.karts[currentKart] = Date.now();
+  if (sn){ var bb = DB.bat[batBySn(sn)]; if (bb && dateCode) bb.bd = dateCode; }
+  $("slotModal").className = "modal"; slotEdit = null;
+  save(); renderKart(); toast("Slot saved");
+};
 
 /* ================= ENTRY PHOTOS ================= */
 var photoTarget = null;   /* "form" while log form is open, else an entry object */

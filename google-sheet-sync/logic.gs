@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.16';
+var LOGIC_VER = 'v8.17';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -1265,7 +1265,7 @@ function batGroups(snap) {
   var bat = (snap && snap.bat) || {}, tomb = (snap && snap.tomb) || {}, groups = {};
   for (var id in bat) {
     var b = bat[id];
-    if (!b || tomb[id] || !b.sn) continue;
+    if (!b || tomb[id] || !b.sn || b.nf) continue;      /* nf: caught up in a kart, never on a form */
     var key = String(b.rcv || '');
     if (!groups[key]) groups[key] = [];
     groups[key].push({ sn: String(b.sn), kart: b.kart === undefined || b.kart === null ? '' : String(b.kart),
@@ -1382,7 +1382,7 @@ function writeBatteryLog(ss, snap) {
                  b.kart || '', b.pos || '', batUS(b.date), b.ini || '', nowIn]);
       continue;
     }
-    rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), bd, 'received', '', '', '', '', nowIn]);
+    rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), bd, b.nf ? 'caught up (already in a kart)' : 'received', '', '', '', '', nowIn]);
     for (var i = 0; i < h.length; i++) {
       var e = h[i];
       var ev = e.out ? ('pulled from kart ' + e.out + (e.st === 'bad' ? ' — BAD, scrapped' : ' — still good, used pile'))
