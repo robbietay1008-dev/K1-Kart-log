@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.11';
+var LOGIC_VER = 'v8.12';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -175,6 +175,8 @@ function handleGet(e) {
     }
     return txt(out.join('\n'));
   }
+  if (e && e.parameter && e.parameter.mode === 'formpdf') return batteryFormPage(e);
+  if (e && e.parameter && e.parameter.mode === 'formwipe') return batteryFormWipe(e);
   if (e && e.parameter && e.parameter.mode === 'bust') {
     /* drop the cached copy of this file so the very next call re-fetches
        it from GitHub — no more waiting out the 10-minute window */
@@ -1193,6 +1195,60 @@ function batUS(iso) {
   if (!m) return String(iso || '');
   return (+m[2]) + '/' + (+m[3]) + '/' + m[1];
 }
+var BAT_DONE_MARK = ' \u2713';   /* tab name suffix once every line of the form is filled in */
+function batComplete(list) {
+  if (!list.length) return false;
+  for (var i = 0; i < list.length; i++) if (!list[i].kart || !list[i].date || !list[i].ini) return false;
+  return true;
+}
+/* find a pallet's tab by its received date, with or without the done mark */
+function batTabFor(ss, iso) {
+  var base = batTabName(iso);
+  return ss.getSheetByName(base) || ss.getSheetByName(base + BAT_DONE_MARK);
+}
+/* ---- GET ?mode=formpdf&date=YYYY-MM-DD : just that form, as a PDF download ----
+   The web app can't stream a file, so the page carries the PDF inline and clicks
+   its own download link; it also offers to wipe the form off the sheet. */
+function batteryFormPage(e) {
+  var iso = String(e.parameter.date || '');
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = batTabFor(ss, iso);
+  if (!sh) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">No form on the sheet for ' + batUS(iso) + '.</p>');
+  var fname = 'Battery Tracking Sheet ' + batTabName(iso).substring(BAT_PREFIX.length) + '.pdf';
+  var url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=pdf&gid=' + sh.getSheetId() +
+            '&size=letter&portrait=true&fitw=true&gridlines=false&printtitle=false&sheetnames=false&pagenum=UNDEFINED' +
+            '&top_margin=0.6&bottom_margin=0.6&left_margin=0.6&right_margin=0.6&horizontal_alignment=CENTER';
+  var resp = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (resp.getResponseCode() !== 200)
+    return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">Could not export: HTTP ' + resp.getResponseCode() + '</p>');
+  var b64 = Utilities.base64Encode(resp.getContent());
+  var self = ScriptApp.getService().getUrl();
+  var html = '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>' + fname + '</title></head>' +
+    '<body style="font-family:-apple-system,Segoe UI,sans-serif; padding:24px; max-width:520px">' +
+    '<h2 style="margin:0 0 6px">' + fname.replace('.pdf', '') + '</h2>' +
+    '<p style="color:#555; margin:0 0 18px">The form as it is on the sheet right now' + (sh.getName().indexOf(BAT_DONE_MARK) > -1 ? ' &mdash; <b style="color:#1d7a3e">complete</b>' : ' &mdash; <b style="color:#b36b00">not complete yet</b>') + '.</p>' +
+    '<p><a id="dl" download="' + fname + '" href="data:application/pdf;base64,' + b64 + '" style="display:inline-block; background:#e10a17; color:#fff; padding:14px 22px; border-radius:10px; text-decoration:none; font-weight:700; font-size:17px">Download PDF</a></p>' +
+    '<p style="color:#777; font-size:13px">If the download did not start by itself, tap the button. On the iPad the PDF opens in Safari &mdash; use Share to save it.</p>' +
+    '<hr style="margin:26px 0; border:0; border-top:1px solid #ddd">' +
+    '<p style="color:#555">Once the PDF is saved you can take this form off the sheet. The batteries, their kart history and BATTERY LOG are kept; only the tab goes.</p>' +
+    '<p><a href="' + self + '?mode=formwipe&date=' + iso + '" onclick="return confirm(\'Wipe the ' + batUS(iso) + ' form off the sheet?\')" style="display:inline-block; background:#2f3546; color:#fff; padding:12px 20px; border-radius:10px; text-decoration:none; font-weight:700">Wipe this form from the sheet</a></p>' +
+    '<script>setTimeout(function(){ try { document.getElementById("dl").click(); } catch(e){} }, 400);</script>' +
+    '</body></html>';
+  return HtmlService.createHtmlOutput(html).setTitle(fname);
+}
+function batteryFormWipe(e) {
+  var iso = String(e.parameter.date || '');
+  var lk = LockService.getScriptLock(); lk.waitLock(30000);
+  try {
+    var archived = loadJson('bat_archived', {});
+    if (e.parameter.undo === '1') delete archived[iso]; else archived[iso] = new Date().toISOString();
+    saveJson('bat_archived', archived);
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    writeBatteryTab(ss, loadJson('snapshot', null));
+  } finally { lk.releaseLock(); }
+  return txt((e.parameter.undo === '1' ? 'form restored: ' : 'form wiped from the sheet: ') + batUS(iso) +
+             ' [' + LOGIC_VER + ']  (undo: add &undo=1 to this address)');
+}
 function batTabName(iso) {
   var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
   return BAT_PREFIX + (m ? (m[2] + '-' + m[3] + '-' + m[1]) : '(no date)');
@@ -1227,13 +1283,23 @@ function writeBatteryTab(ss, snap) {
   /* the single-tab layout from the first cut (9/19) is superseded by the per-date tabs */
   var legacy = ss.getSheetByName('BATTERY TRACKING');
   if (legacy) tryOp(function () { ss.deleteSheet(legacy); });
+  var archived = loadJson('bat_archived', {});
   var wanted = {}, total = 0;
   for (var i = 0; i < g.keys.length; i++) {
-    var key = g.keys[i], name = batTabName(key);
-    wanted[name] = 1;
-    var sh = have[name] || ss.insertSheet(name);
-    drawBatteryPage(sh, g.groups[key], center, batUS(key));
-    total += g.groups[key].length;
+    var key = g.keys[i], base = batTabName(key), list = g.groups[key];
+    var done = batComplete(list);
+    var name = base + (done ? BAT_DONE_MARK : '');
+    var sh = have[base] || have[base + BAT_DONE_MARK] || null;
+    if (archived[key]) {                        /* wiped from the sheet on purpose; the log keeps it */
+      if (sh) tryOp(function () { ss.deleteSheet(sh); });
+      wanted[base] = 1; wanted[base + BAT_DONE_MARK] = 1;   /* not a kept tab either */
+      continue;
+    }
+    if (!sh) sh = ss.insertSheet(name);
+    else if (sh.getName() !== name) tryOp(function () { sh.setName(name); });
+    wanted[base] = 1; wanted[base + BAT_DONE_MARK] = 1;
+    drawBatteryPage(sh, list, center, batUS(key));
+    total += list.length;
   }
   /* a tab, once made, stays: an emptied pallet keeps its (now blank) paper and the
      blank FORM tab is always there to print */

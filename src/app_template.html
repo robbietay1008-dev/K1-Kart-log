@@ -330,6 +330,11 @@
       <input type="search" class="in" id="batSearch" placeholder="Find serial / kart" style="width:46%; min-height:40px">
     </div>
   </div>
+  <div class="kd" style="padding-bottom:0">
+    <div class="sectionlabel" style="padding-left:2px">FORMS (one per date received)</div>
+    <div id="batForms" style="margin-top:8px"></div>
+    <div class="sectionlabel" style="padding-left:2px">ALL BATTERIES</div>
+  </div>
   <div class="kd" id="batList"></div>
 </div>
 
@@ -1312,7 +1317,39 @@ function batNumber(id){
   }
   return "?";
 }
+function renderBatForms(){
+  var el = $("batForms"); el.innerHTML = "";
+  var list = batSorted(), groups = {}, keys = [];
+  for (var i=0;i<list.length;i++){
+    var r = list[i].b.rcv || "";
+    if (!groups[r]){ groups[r] = { n:0, done:0 }; keys.push(r); }
+    groups[r].n++;
+    if (list[i].b.kart && list[i].b.date && list[i].b.ini) groups[r].done++;
+  }
+  keys.sort(); keys.reverse();
+  if (!keys.length){ el.innerHTML = '<div style="color:#667;padding:8px 0 12px">No batches yet — receive one above.</div>'; return; }
+  for (var k=0;k<keys.length;k++){
+    (function(rcv, g){
+      var complete = g.done === g.n;
+      var div = document.createElement("div");
+      div.className = "partitem";
+      div.style.borderColor = complete ? "#1d7a3e" : "#384060";
+      div.innerHTML = '<span class="pd"><span style="font-size:16px; font-weight:800; color:#fff">Received ' + esc(isoToUS(rcv) || "no date") + '</span><br>' +
+        g.n + ' scanned &middot; ' + g.done + ' filled in' +
+        (complete ? ' &middot; <span style="color:#4caf7a; font-weight:800">&#10003; COMPLETE — download it</span>' : ' &middot; ' + (g.n - g.done) + ' still on the shelf') + '</span>' +
+        (DB.meta.syncUrl ? '<button class="hbtn' + (complete ? ' red' : '') + '" style="min-height:40px; padding:6px 12px; font-size:14px">PDF</button>' : '');
+      var b = div.querySelector("button");
+      if (b) b.onclick = function(ev){
+        ev.stopPropagation();
+        window.open(DB.meta.syncUrl + (DB.meta.syncUrl.indexOf("?")>-1?"&":"?") + "mode=formpdf&date=" + rcv, "_blank");
+      };
+      div.onclick = function(){ $("batSearch").value = isoToUS(rcv); renderBat(); };
+      el.appendChild(div);
+    })(keys[k], groups[keys[k]]);
+  }
+}
 function renderBat(){
+  renderBatForms();
   var q = batClean($("batSearch").value);
   var el = $("batList"); el.innerHTML = "";
   var list = batSorted(), shown = 0, noKart = 0;

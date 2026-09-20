@@ -60,7 +60,8 @@ function makeSheet(rows, name) {
     },
     setFrozenRows() {}, clear() {},
     clearContents() { for (let i = 0; i < g.length; i++) for (let j = 0; j < g[i].length; j++) g[i][j] = ''; },
-    getIndex: () => 3, getMaxRows: () => g.length, setName() {}
+    getIndex: () => 3, getMaxRows: () => g.length, getSheetId: () => 7,
+    setName(n) { delete tabs[name]; name = n; tabs[n] = this; }
   };
 }
 
@@ -74,7 +75,7 @@ const sandbox = {
       getSheetByName: n => tabs[n] || null,
       getSheets: () => Object.keys(tabs).map(k => tabs[k]),
       insertSheet: n => (tabs[n] = makeSheet([new Array(14).fill('')], n)),
-      deleteSheet: sh => { delete tabs[sh.getName()]; }, getSpreadsheetTimeZone: () => 'UTC'
+      deleteSheet: sh => { delete tabs[sh.getName()]; }, getSpreadsheetTimeZone: () => 'UTC', getId: () => 'SSID'
     }),
     flush: () => {}, getUi: () => { throw new Error('no ui'); },
     BorderStyle: { SOLID_MEDIUM: 'M' }
@@ -117,7 +118,7 @@ function invAnswer() {
   return vm.runInContext(`(function(){ var r = mergeCfg(SpreadsheetApp.getActiveSpreadsheet(), loadJson('snapshot', null));
     return JSON.stringify({ ok: true, names: r.names, del: r.del, cfgAt: r.at, receipts: [] }); })()`, sandbox);
 }
-function batTab(name) { const t = tabs[name]; return t ? t._g.map(r => r.slice(0, 5)) : null; }
+function batTab(name) { const t = tabs[name] || tabs[name + ' \u2713']; return t ? t._g.map(r => r.slice(0, 5)) : null; }
 function batTabNameJS(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso); return 'BATTERIES ' + m[2] + '-' + m[3] + '-' + m[1]; }
 
 const posts = [];
@@ -342,6 +343,32 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('30 numbered rows like the paper', t[32][0] === 30 && t[32][1] === '' && t.length >= 33, t.length);
   let t2 = batTab('BATTERIES 09-26-2026');
   ok('9/26 tab has its own #1 still on the shelf', t2[3][1] === '6180407777' && t2[3][2] === '' && t2[0][4] === '9/26/2026', t2[3]);
+
+  /* forms list in the app */
+  await A.page.evaluate(() => { showScreen('scrBat'); renderBat(); });
+  s = await A.page.evaluate(() => Array.from($('batForms').children).map(r => r.textContent));
+  ok('forms list shows the 9/19 and 9/26 dates, neither complete', s.length >= 2 && s[0].indexOf('9/26/2026') > -1 && s.filter(x => /9\/(19|26)\/2026/.test(x)).every(x => x.indexOf('COMPLETE') === -1), s);
+  /* fill the last shelf battery on 9/19 and the tab gets the done mark */
+  await A.page.evaluate(() => { const id = batBySn('6180409549'); batAssign(id, '7', '3', '2026-09-22', 'RB'); save(); });
+  await push(A);
+  ok('9/19 tab renamed with the done mark, old name gone', !!tabs['BATTERIES 09-19-2026 \u2713'] || (tabs['BATTERIES 09-19-2026'] && true));
+  await A.page.evaluate(() => renderBat());
+  s = await A.page.evaluate(() => Array.from($('batForms').children).map(r => r.textContent));
+  ok('app marks the 9/19 form COMPLETE', s.find(x => x.indexOf('9/19/2026') > -1).indexOf('COMPLETE') > -1, s);
+  /* formpdf + formwipe through the real handleGet with a fake export */
+  sandbox.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getContent: () => [37, 80, 68, 70] }) };
+  sandbox.ScriptApp = { getOAuthToken: () => 't', getService: () => ({ getUrl: () => 'http://x/exec' }) };
+  sandbox.Utilities.base64Encode = () => 'JVBERg==';
+  sandbox.HtmlService = { createHtmlOutput: h => ({ _h: h, setTitle() { return this; } }) };
+  let pg = vm.runInContext(`handleGet({ parameter: { mode: 'formpdf', date: '2026-09-19' } })`, sandbox);
+  ok('formpdf returns a page with an inline PDF download for that date', pg && pg._h.indexOf('download="Battery Tracking Sheet 09-19-2026.pdf"') > -1 && pg._h.indexOf('data:application/pdf;base64,JVBERg==') > -1 && pg._h.indexOf('complete</b>') > -1);
+  vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-09-19' } })`, sandbox);
+  ok('formwipe removes the 9/19 tab', !tabs['BATTERIES 09-19-2026'] && !tabs['BATTERIES 09-19-2026 \u2713'] && !!tabs['BATTERIES 09-26-2026']);
+  ok('battery log still has 9549', tabs['BATTERY LOG']._g.some(r => r[1] === '6180409549'));
+  vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-09-19', undo: '1' } })`, sandbox);
+  ok('undo brings the tab back', !!(tabs['BATTERIES 09-19-2026'] || tabs['BATTERIES 09-19-2026 \u2713']));
+  await A.page.evaluate(() => { const id = batBySn('6180409549'); batAssign(id, '', '', '', ''); DB.bat[id].date = ''; DB.bat[id].ini = ''; save(); });
+  await push(A);
 
   /* Center typed on one tab is copied to all of them and survives */
   tabs['BATTERIES 09-19-2026']._g[0][1] = 'Arlington';
