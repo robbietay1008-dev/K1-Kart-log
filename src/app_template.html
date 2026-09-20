@@ -1261,7 +1261,18 @@ function renderBatBatch(){
     var b = DB.bat[batBatch[i]]; if (!b) continue;
     var d = document.createElement("div");
     d.className = "partitem";
-    d.innerHTML = '<span class="pn">#' + batNumber(batBatch[i]) + '</span><span class="pd" style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>';
+    d.innerHTML = '<span class="pn">#' + batNumber(batBatch[i]) + '</span><span class="pd" style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>' +
+      '<button class="delx" style="font-size:22px; color:#ff8a80; padding:4px 12px">&times;</button>';
+    (function(id){
+      d.querySelector(".delx").onclick = function(ev){
+        ev.stopPropagation();
+        DB.tomb[id] = Date.now(); delete DB.bat[id];
+        batBatch.splice(batBatch.indexOf(id), 1);
+        save(); renderBatBatch();
+        $("batBatchLast").textContent = "Removed " + b.sn;
+        batFocusScan();
+      };
+    })(batBatch[i]);
     el.appendChild(d);
   }
 }
@@ -1273,8 +1284,9 @@ function batAddFromScan(){
   if (sn.length < 6){ $("batBatchLast").textContent = "Not a serial: " + sn; toast("That doesn't look like a serial: " + sn, true); batFocusScan(); return; }
   var have = batBySn(sn);
   if (have){
-    var msg = (batBatch.indexOf(have) > -1) ? "Already in this batch: " + sn : "Already scanned in (received " + isoToUS(DB.bat[have].rcv) + "): " + sn;
-    $("batBatchLast").textContent = msg; toast(msg, true);
+    /* a double-trigger on the same battery is normal — just note it and keep going */
+    $("batBatchLast").textContent = (batBatch.indexOf(have) > -1) ? "Skipped — already in this batch: " + sn
+                                    : "Skipped — already received " + isoToUS(DB.bat[have].rcv) + ": " + sn;
     batFocusScan(); return;
   }
   var rcv = $("batDefRcv").value || todayISO();
