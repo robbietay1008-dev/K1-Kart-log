@@ -209,6 +209,7 @@
   <div style="padding:12px 14px 0">
     <button class="hbtn" id="btnShop" style="width:100%; min-height:54px; border:1px dashed #4a5674">&#128736;&#65039; SHOP PARTS USE (not for a kart)</button>
     <button class="hbtn" id="btnInv" style="width:100%; min-height:54px; border:1px dashed #4a5674; margin-top:8px">&#128230; INVENTORY &amp; STOCK</button>
+    <button class="hbtn" id="btnBat" style="width:100%; min-height:54px; border:1px dashed #4a5674; margin-top:8px">&#128267; BATTERY SCAN-IN</button>
   </div>
   <div class="sectionlabel">ADULT KARTS</div>
   <div class="grid" id="gridAdult"></div>
@@ -313,6 +314,82 @@
   </div>
 </div>
 
+<!-- ============ BATTERIES ============ -->
+<div class="screen" id="scrBat">
+  <div class="hdr">
+    <div class="backrow">
+      <button class="hbtn" id="btnBack5">&#8592; Karts</button>
+      <h1>BATTERIES</h1>
+    </div>
+  </div>
+  <div class="searchwrap">
+    <label class="f">DATE RECEIVED &mdash; the batch these scans go on</label>
+    <div style="display:flex; margin-bottom:8px">
+      <input type="date" class="in" id="batDefRcv" style="flex:1">
+    </div>
+    <div style="display:flex">
+      <input type="text" class="in" id="batScan" placeholder="Scan barcode or type serial, then Enter" autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
+      <button class="hbtn red" id="btnBatAdd" style="min-height:48px; padding:0 16px">ADD</button>
+    </div>
+    <p style="color:#9aa3b5; font-size:12px; margin:6px 0 0">Scan every battery when a pallet comes in. Each received date becomes its own BATTERIES tab on the sheet, laid out like the corporate paper &mdash; print it when it's full. Kart #, date used and initials fill in later, when the battery is logged into a kart.</p>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px">
+      <span id="batProgress" style="color:#9aa3b5; font-weight:700; font-size:14px"></span>
+      <input type="search" class="in" id="batSearch" placeholder="Find serial / kart" style="width:46%; min-height:40px">
+    </div>
+  </div>
+  <div class="kd" id="batList"></div>
+</div>
+
+<!-- battery edit modal -->
+<div class="modal" id="batModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle" id="batTitle">Battery</div>
+    <p id="batSerial" style="font-size:22px; font-weight:800; letter-spacing:1px; margin-bottom:12px"></p>
+    <label class="f">DATE RECEIVED</label>
+    <input type="date" class="in" id="batRcv">
+    <label class="f" style="margin-top:10px">KART NUMBER</label>
+    <input type="number" class="in" id="batKart" inputmode="numeric" placeholder="blank = not in a kart yet">
+    <label class="f" style="margin-top:10px">POSITION IN KART</label>
+    <div class="chiprow" id="batPosRow"></div>
+    <label class="f" style="margin-top:10px">DATE USED</label>
+    <input type="date" class="in" id="batDate">
+    <label class="f" style="margin-top:10px">INITIALS</label>
+    <input type="text" class="in" id="batIni" autocapitalize="characters" maxlength="4">
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnBatDelete" style="flex:1; margin-right:10px; color:#ff8a80; border-color:#7a2a2a">DELETE</button>
+      <button class="hbtn" id="btnBatCancel" style="flex:1; margin-right:10px">Cancel</button>
+      <button class="hbtn red" id="btnBatSave" style="flex:1">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<!-- which scanned batteries went into the kart just logged -->
+<div class="modal" id="batUseModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:40px 14px 0;">
+    <div class="mtitle" id="batUseTitle">Batteries into Kart</div>
+    <p style="color:#9aa3b5; font-size:13px; margin-bottom:8px" id="batUseHint">Scan the barcode on each battery that went in, or tap it in the list.</p>
+    <div style="display:flex">
+      <input type="text" class="in" id="batUseScan" placeholder="Scan serial, then Enter" autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
+      <button class="hbtn" id="btnBatUseAdd" style="min-height:48px; padding:0 14px">ADD</button>
+    </div>
+    <div id="batUseList" style="margin-top:8px; max-height:34vh; overflow:auto"></div>
+    <div style="display:flex; margin-top:10px">
+      <span style="flex:1; margin-right:8px">
+        <label class="f">DATE USED</label>
+        <input type="date" class="in" id="batUseDate">
+      </span>
+      <span style="flex:1">
+        <label class="f">INITIALS</label>
+        <input type="text" class="in" id="batUseIni" autocapitalize="characters" maxlength="4">
+      </span>
+    </div>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnBatUseSkip" style="flex:1; margin-right:10px">No serial / skip</button>
+      <button class="hbtn red" id="btnBatUseSave" style="flex:1">SAVE</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ SHOP PARTS ============ -->
 <div class="screen" id="scrShop">
   <div class="hdr">
@@ -347,6 +424,7 @@
       <button class="knotes" id="knotesBox"></button>
       <h3 style="margin-top:14px">BATTERIES</h3>
       <div class="srow" id="batRow"></div>
+      <div class="statushint" id="batSerials" style="margin-top:6px"></div>
       <div class="statushint" id="weldHint"></div>
     </div>
     <button class="bigbtn" id="btnLog">+ LOG WORK</button>
@@ -663,6 +741,7 @@ function load(){
   if (!DB.cfgTouched) DB.cfgTouched = {};
   if (!DB.partTomb) DB.partTomb = {};
   if (!DB.rekeys) DB.rekeys = [];
+  if (!DB.bat) DB.bat = {};                         /* scanned batteries: id -> {sn,kart,date,ini,c,at} */
   /* deterministic ids for pre-merge entries (same seed => same ids on every device) */
   var allids = ADULT_KARTS.concat(JR_KARTS);
   for (var ii=0; ii<allids.length; ii++){
@@ -737,6 +816,7 @@ function buildSnapshot(){
            tomb: DB.tomb, stamps: DB.stamps, invTouched: DB.invTouched,
            invCounted: DB.invCounted,
            cfgTouched: DB.cfgTouched, partTomb: DB.partTomb, rekeys: DB.rekeys,
+           bat: DB.bat,
            rc: DB.meta.rcApplied, parts: PARTS };
 }
 var pullSeq = 0;
@@ -876,6 +956,49 @@ function mergeRemote(r){
       changed = true;
     }
   }
+  /* batteries: per-entry, newest edit wins; a serial scanned on two devices
+     collapses onto the one scanned first */
+  var rb = r.bat || {};
+  var bySn = {};
+  for (var bl in DB.bat) if (DB.bat[bl] && DB.bat[bl].sn) bySn[DB.bat[bl].sn] = bl;
+  for (var bid in rb){
+    var rbe = rb[bid];
+    if (!rbe || !rbe.sn || DB.tomb[bid]) continue;
+    var lbe = DB.bat[bid];
+    if (!lbe){
+      var dup = bySn[rbe.sn];
+      if (dup && dup !== bid){
+        var keep = DB.bat[dup];
+        if ((rbe.c || 0) < (keep.c || 0)){
+          /* theirs is the earlier scan — it owns the row, ours becomes a duplicate */
+          if (!rbe.kart && keep.kart) rbe.kart = keep.kart;
+          if (!rbe.ini && keep.ini) rbe.ini = keep.ini;
+          DB.tomb[dup] = Date.now(); delete DB.bat[dup];
+          DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || keep.rcv || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: Date.now(), h: (keep.h || []).concat(rbe.h || []) };
+          bySn[rbe.sn] = bid;
+        } else {
+          if (!keep.kart && rbe.kart){ keep.kart = rbe.kart; keep.at = Date.now(); }
+          if (!keep.ini && rbe.ini){ keep.ini = rbe.ini; keep.at = Date.now(); }
+          DB.tomb[bid] = Date.now();
+        }
+        changed = true; continue;
+      }
+      DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: rbe.at || 0, h: rbe.h || [] };
+      bySn[rbe.sn] = bid; changed = true;
+    } else if ((rbe.at || 0) > (lbe.at || 0)){
+      lbe.sn = rbe.sn; lbe.rcv = rbe.rcv || ""; lbe.kart = rbe.kart || ""; lbe.pos = rbe.pos || ""; lbe.date = rbe.date || ""; lbe.ini = rbe.ini || ""; lbe.at = rbe.at;
+      changed = true;
+    }
+    /* history is a union: an event is identified by its timestamp */
+    var lh = DB.bat[bid] && DB.bat[bid].h, rh = rbe.h || [];
+    if (DB.bat[bid] && rh.length){
+      if (!lh) lh = DB.bat[bid].h = [];
+      var seen = {}; for (var hi=0;hi<lh.length;hi++) seen[lh[hi].t] = 1;
+      for (var hj=0;hj<rh.length;hj++) if (!seen[rh[hj].t]){ lh.push(rh[hj]); changed = true; }
+      lh.sort(function(x,y){ return (x.t||0)-(y.t||0); });
+    }
+  }
+  for (var bd in DB.bat){ if (DB.tomb[bd]){ delete DB.bat[bd]; changed = true; } }
   /* receipt-applied + photo link unions */
   var rrc = r.rc || {};
   for (var rid in rrc){ if (!DB.meta.rcApplied[rid]){ DB.meta.rcApplied[rid] = 1; changed = true; } }
@@ -887,6 +1010,7 @@ function refreshActive(){
   if ($("scrKart").className.indexOf("active") > -1 && currentKart) renderKart();
   else if ($("scrShop").className.indexOf("active") > -1) renderShop();
   else if ($("scrInv").className.indexOf("active") > -1) renderInv();
+  else if ($("scrBat").className.indexOf("active") > -1) renderBat();
   else renderHome();
 }
 function syncNow(silent){
@@ -1006,6 +1130,7 @@ function pullFromSheet(){
       if (resp.stamps) DB.stamps = resp.stamps;
       if (resp.invTouched) DB.invTouched = resp.invTouched;
       if (resp.rc) DB.meta.rcApplied = resp.rc;
+      if (resp.bat) DB.bat = resp.bat;
       /* photos already stored in the sheet don't need re-upload from this device */
       for (var pid in DB.meta.photoUrls) DB.meta.up[pid] = 1;
       save(); renderHome();
@@ -1018,6 +1143,291 @@ function pullFromSheet(){
   document.body.appendChild(s);
   toast("Loading from sheet...");
 }
+
+/* ================= BATTERIES (scan-in) ================= */
+var batModalId = null, batModalPos = "";
+function renderBatPosRow(){
+  var row = $("batPosRow"); row.innerHTML = "";
+  var k = String($("batKart").value || "").trim();
+  var n = k ? batSlots(k) : 4;
+  for (var i=1;i<=n;i++){
+    (function(i){
+      var c = document.createElement("button");
+      c.className = "chip" + (String(batModalPos) === String(i) ? " on" : "");
+      c.textContent = "BAT " + i;
+      c.onclick = function(){ batModalPos = (String(batModalPos) === String(i)) ? "" : String(i); renderBatPosRow(); };
+      row.appendChild(c);
+    })(i);
+  }
+}
+function batSorted(){
+  var arr = [];
+  for (var id in DB.bat){ var b = DB.bat[id]; if (b && b.sn) arr.push({ id:id, b:b }); }
+  arr.sort(function(x,y){ return (x.b.c||0) - (y.b.c||0) || (x.id < y.id ? -1 : 1); });
+  return arr;
+}
+function batBySn(sn){
+  for (var id in DB.bat) if (DB.bat[id] && DB.bat[id].sn === sn) return id;
+  return null;
+}
+function batForKart(k){
+  var out = [], list = batSorted();
+  for (var i=0;i<list.length;i++) if (String(list[i].b.kart) === String(k)) out.push(list[i].b.sn);
+  return out;
+}
+function batAtPos(k, pos){
+  for (var id in DB.bat){ var b = DB.bat[id]; if (b && String(b.kart) === String(k) && +b.pos === +pos) return b.sn; }
+  return "";
+}
+function batSlots(k){ return +k >= 41 ? 2 : 4; }
+/* put a battery into a kart slot: records the event in its history, and whatever
+   was sitting in that slot before comes out (its history says so too) */
+function batAssign(id, kart, pos, date, ini){
+  var b = DB.bat[id]; if (!b) return;
+  var now = Date.now();
+  if (kart && pos){
+    for (var o in DB.bat){
+      var ob = DB.bat[o];
+      if (o !== id && ob && String(ob.kart) === String(kart) && +ob.pos === +pos){
+        if (!ob.h) ob.h = [];
+        ob.h.push({ k: "", p: "", d: date, i: ini, t: now, out: String(kart) });
+        ob.kart = ""; ob.pos = ""; ob.at = now;
+      }
+    }
+  }
+  b.kart = String(kart || ""); b.pos = pos ? String(pos) : ""; b.date = date || ""; b.ini = ini || ""; b.at = now;
+  if (!b.h) b.h = [];
+  b.h.push({ k: b.kart, p: b.pos, d: b.date, i: b.ini, t: now });
+}
+function batClean(v){
+  /* scanners sometimes prefix/suffix junk; keep letters+digits only */
+  return String(v||"").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
+}
+function batAddFromScan(){
+  var inp = $("batScan");
+  var sn = batClean(inp.value);
+  inp.value = "";
+  if (!sn){ inp.focus(); return; }
+  if (sn.length < 6){ toast("That doesn't look like a serial: " + sn, true); inp.focus(); return; }
+  var have = batBySn(sn);
+  if (have){
+    toast("Already scanned — #" + batNumber(have) + ". Tap it to change.", true);
+    renderBat(); inp.focus(); return;
+  }
+  var rcv = $("batDefRcv").value || todayISO();
+  var id = batCreate(sn, rcv);
+  save(); renderBat();
+  toast("#" + batNumber(id) + "  " + sn + "  (received " + isoToUS(rcv) + ")");
+  inp.focus();
+}
+function batCreate(sn, rcv){
+  var now = Date.now();
+  var id = "b" + now.toString(36) + Math.floor(Math.random()*1e6).toString(36);
+  DB.bat[id] = { sn: sn, rcv: rcv || todayISO(), kart: "", date: "", ini: "", c: now, at: now };
+  return id;
+}
+function batNumber(id){
+  var me = DB.bat[id]; if (!me) return "?";
+  var list = batSorted(), n = 0;
+  for (var i=0;i<list.length;i++){
+    if ((list[i].b.rcv||"") !== (me.rcv||"")) continue;
+    n++;
+    if (list[i].id === id) return n;
+  }
+  return "?";
+}
+function renderBat(){
+  var q = batClean($("batSearch").value);
+  var el = $("batList"); el.innerHTML = "";
+  var list = batSorted(), shown = 0, noKart = 0;
+  for (var i=0;i<list.length;i++) if (!list[i].b.kart) noKart++;
+  $("batProgress").textContent = list.length + " scanned" + (noKart ? " · " + noKart + " on the shelf" : "");
+  for (var j=list.length-1; j>=0; j--){
+    var id = list[j].id, b = list[j].b;
+    if (q && b.sn.indexOf(q) === -1 && ("KART"+b.kart).indexOf(q) === -1 && String(b.kart) !== q &&
+        batClean(isoToUS(b.rcv)).indexOf(q) === -1) continue;
+    shown++;
+    (function(id, b){
+      var div = document.createElement("div");
+      div.className = "partitem";
+      if (!b.kart) div.style.borderColor = "#8a6d1d";
+      div.innerHTML = '<span class="pn">#'+batNumber(id)+'</span><span class="pd">' +
+        '<span style="font-size:17px; font-weight:800; color:#fff; letter-spacing:1px">'+esc(b.sn)+'</span><br>' +
+        'Rcvd ' + esc(isoToUS(b.rcv) || "?") + ' &middot; ' +
+        (b.kart ? 'Kart <b style="color:#fff">'+esc(String(b.kart))+'</b>' + (b.pos ? ' BAT ' + esc(String(b.pos)) : '') + ' &middot; ' + esc(isoToUS(b.date) || "no date") + ' &middot; ' + (b.ini ? esc(b.ini) : '<span style="color:#ffc857">no initials</span>')
+                : '<span style="color:#ffc857; font-weight:700">on the shelf</span>') +
+        '</span>';
+      div.onclick = function(){ openBatModal(id); };
+      el.appendChild(div);
+    })(id, b);
+  }
+  if (!shown) el.innerHTML = '<div style="color:#667;padding:16px;text-align:center">' + (list.length ? "Nothing matches" : "No batteries scanned yet — scan the barcode on the side of the battery") + '</div>';
+}
+function openBatModal(id){
+  var b = DB.bat[id]; if (!b) return;
+  batModalId = id;
+  $("batTitle").textContent = "Battery #" + batNumber(id);
+  $("batSerial").textContent = b.sn;
+  $("batRcv").value = b.rcv || "";
+  $("batKart").value = b.kart || "";
+  batModalPos = b.pos || "";
+  renderBatPosRow();
+  $("batDate").value = b.date || "";
+  $("batIni").value = b.ini || "";
+  $("batModal").className = "modal open";
+}
+$("btnBat").onclick = function(){
+  $("batSearch").value = "";
+  if (!$("batDefRcv").value) $("batDefRcv").value = todayISO();
+  renderBat(); showScreen("scrBat"); window.scrollTo(0,0);
+  setTimeout(function(){ try { $("batScan").focus(); } catch(e){} }, 50);
+};
+$("btnBack5").onclick = function(){ showScreen("scrHome"); renderHome(); };
+$("btnBatAdd").onclick = batAddFromScan;
+$("batScan").addEventListener("keydown", function(ev){
+  var k = ev.keyCode || ev.which;
+  if (k === 13 || k === 9){ ev.preventDefault(); batAddFromScan(); }
+});
+$("batSearch").addEventListener("input", renderBat);
+$("btnBatCancel").onclick = function(){ $("batModal").className = "modal"; batModalId = null; };
+$("batKart").addEventListener("input", renderBatPosRow);
+$("btnBatSave").onclick = function(){
+  var b = DB.bat[batModalId]; if (!b) return;
+  var kart = String($("batKart").value || "").trim();
+  if (kart && ADULT_KARTS.concat(JR_KARTS).indexOf(+kart) === -1){
+    if (!confirm("Kart " + kart + " isn't on the grid. Save it anyway?")) return;
+  }
+  b.rcv = $("batRcv").value || b.rcv || "";
+  var nIni = String($("batIni").value || "").trim().toUpperCase();
+  var nDate = $("batDate").value || "";
+  if (kart !== String(b.kart||"") || String(batModalPos) !== String(b.pos||"")) batAssign(batModalId, kart, batModalPos, nDate, nIni);
+  else { b.date = nDate; b.ini = nIni; b.at = Date.now(); }
+  if (nIni) DB.meta.batIni = nIni;
+  save();
+  $("batModal").className = "modal"; batModalId = null;
+  renderBat(); toast("Saved");
+};
+$("btnBatDelete").onclick = function(){
+  var b = DB.bat[batModalId]; if (!b) return;
+  if (!confirm("Remove battery " + b.sn + " from the list?")) return;
+  DB.tomb[batModalId] = Date.now();
+  delete DB.bat[batModalId];
+  save();
+  $("batModal").className = "modal"; batModalId = null;
+  renderBat(); toast("Removed");
+};
+
+/* ---- the popup after a log that used a battery ---- */
+var batUse = null;   /* { kart, dateISO, qty, sel: {id:1} } */
+function partsUseBattery(partsStr, action){
+  /* qty of optima batteries in the parts string; 0 if none. Falls back to the
+     action text so "replace battery" with no part still asks. */
+  var qty = 0, m, re = /(^|,)\s*0*59191\s*x?\s*(\d*)/gi;
+  while ((m = re.exec(partsStr || ""))) qty += parseInt(m[2] || "1", 10) || 1;
+  if (!qty && /BATTER/i.test(action || "")) qty = 1;
+  return qty;
+}
+function openBatUse(kart, dateISO, qty){
+  batUse = { kart: String(kart), dateISO: dateISO, qty: qty, sel: {}, pos: {} };
+  $("batUseTitle").textContent = "Batteries into Kart " + kart;
+  $("batUseHint").textContent = (qty > 1 ? qty + " batteries logged. " : "") + "Scan the barcode on each battery that went in, or tap it in the list.";
+  $("batUseDate").value = dateISO || todayISO();
+  $("batUseIni").value = DB.meta.batIni || "";
+  $("batUseScan").value = "";
+  renderBatUse();
+  $("batUseModal").className = "modal open";
+  setTimeout(function(){ try { $("batUseScan").focus(); } catch(e){} }, 50);
+}
+function renderBatUse(){
+  var el = $("batUseList"); el.innerHTML = "";
+  var list = batSorted(), n = 0;
+  /* on-the-shelf batteries first, then whatever is already selected */
+  for (var pass=0; pass<2; pass++){
+    for (var i=list.length-1; i>=0; i--){
+      var id = list[i].id, b = list[i].b, on = !!batUse.sel[id];
+      var shelf = !b.kart || b.kart === batUse.kart;
+      if (pass === 0 ? !shelf : (shelf || !on)) continue;
+      n++;
+      (function(id, b, on){
+        var div = document.createElement("div");
+        div.className = "partitem";
+        div.style.borderColor = on ? "#1d7a3e" : (b.kart ? "#7a2a2a" : "#384060");
+        div.innerHTML = '<span class="pn">' + (on ? "&#10003;" : "&nbsp;&nbsp;") + '</span><span class="pd">' +
+          '<span style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>' +
+          ' &middot; rcvd ' + esc(isoToUS(b.rcv) || "?") +
+          (b.kart && b.kart !== batUse.kart ? ' &middot; <span style="color:#ff8a80">in kart ' + esc(b.kart) + '</span>' : '') +
+          (b.kart === batUse.kart ? ' &middot; <span style="color:#4caf7a">already this kart</span>' : '') + '</span>';
+        div.onclick = function(){ if (batUse.sel[id]){ delete batUse.sel[id]; delete batUse.pos[id]; } else batUse.sel[id] = 1; renderBatUse(); };
+        el.appendChild(div);
+        if (on){
+          var pr = document.createElement("div");
+          pr.className = "chiprow"; pr.style.margin = "-4px 0 10px 8px";
+          var lab = document.createElement("span"); lab.style.cssText = "color:#9aa3b5; font-size:12px; font-weight:700; padding:8px 6px 0 0"; lab.textContent = "POSITION:";
+          pr.appendChild(lab);
+          var nslots = batSlots(batUse.kart);
+          for (var pi=1; pi<=nslots; pi++){
+            (function(pi){
+              var c = document.createElement("button");
+              var taken = "";
+              for (var oid in batUse.pos) if (oid !== id && +batUse.pos[oid] === pi) taken = oid;
+              var cur = batAtPos(batUse.kart, pi);
+              c.className = "chip" + (+batUse.pos[id] === pi ? " on" : "");
+              c.innerHTML = "BAT " + pi + (cur && !taken ? ' <small style="opacity:.7">(' + esc(cur.slice(-4)) + ')</small>' : '');
+              c.onclick = function(ev){ ev.stopPropagation(); if (taken) delete batUse.pos[taken]; batUse.pos[id] = String(pi); renderBatUse(); };
+              pr.appendChild(c);
+            })(pi);
+          }
+          el.appendChild(pr);
+        }
+      })(id, b, on);
+    }
+  }
+  if (!n) el.innerHTML = '<div style="color:#667;padding:12px;text-align:center">Nothing on the shelf — scan the serial to add it</div>';
+  var c = 0; for (var k in batUse.sel) c++;
+  $("btnBatUseSave").textContent = "SAVE" + (c ? " (" + c + (batUse.qty > 1 ? " of " + batUse.qty : "") + ")" : "");
+}
+function batUseScanAdd(){
+  var inp = $("batUseScan"), sn = batClean(inp.value); inp.value = "";
+  if (!sn){ inp.focus(); return; }
+  if (sn.length < 6){ toast("That doesn't look like a serial: " + sn, true); inp.focus(); return; }
+  var id = batBySn(sn);
+  if (!id){
+    if (!confirm(sn + " was never scanned in.\nAdd it now (received today) and put it in kart " + batUse.kart + "?")){ inp.focus(); return; }
+    id = batCreate(sn, todayISO());
+    save();
+  } else if (DB.bat[id].kart && DB.bat[id].kart !== batUse.kart){
+    if (!confirm(sn + " is logged in kart " + DB.bat[id].kart + ".\nMove it to kart " + batUse.kart + "?")){ inp.focus(); return; }
+  }
+  batUse.sel[id] = 1;
+  renderBatUse(); inp.focus();
+}
+$("btnBatUseAdd").onclick = batUseScanAdd;
+$("batUseScan").addEventListener("keydown", function(ev){
+  var k = ev.keyCode || ev.which;
+  if (k === 13 || k === 9){ ev.preventDefault(); batUseScanAdd(); }
+});
+$("btnBatUseSave").onclick = function(){
+  if (!batUse) return;
+  var ids = [], k; for (k in batUse.sel) ids.push(k);
+  if (!ids.length){ toast("Scan or tap the battery that went in", true); return; }
+  var ini = String($("batUseIni").value || "").trim().toUpperCase();
+  if (!ini){ toast("Enter your initials", true); return; }
+  var date = $("batUseDate").value || todayISO();
+  var missing = 0;
+  for (var m=0;m<ids.length;m++) if (!batUse.pos[ids[m]]) missing++;
+  if (missing && !confirm(missing + " battery" + (missing>1?"ies have":" has") + " no position (BAT 1-" + batSlots(batUse.kart) + ").\nSave anyway?")) return;
+  for (var i=0;i<ids.length;i++) batAssign(ids[i], batUse.kart, batUse.pos[ids[i]] || "", date, ini);
+  DB.meta.batIni = ini;
+  save();
+  var kk = batUse.kart;
+  $("batUseModal").className = "modal"; batUse = null;
+  if ($("scrKart").className.indexOf("active") > -1) renderKart();
+  toast(ids.length + (ids.length > 1 ? " batteries" : " battery") + " → kart " + kk);
+};
+$("btnBatUseSkip").onclick = function(){
+  if (!confirm("Skip without a serial? The paper won't show which battery went into kart " + batUse.kart + ".")) return;
+  $("batUseModal").className = "modal"; batUse = null;
+};
 
 /* ================= HELPERS ================= */
 function $(id){ return document.getElementById(id); }
@@ -1120,15 +1530,19 @@ function renderKart(){
   var brow = $("batRow"); brow.innerHTML = "";
   var nbat = isJr ? 2 : 4;
   for (var j=0;j<nbat;j++){
-    (function(f, label){
+    (function(f, label, j){
       var d = document.createElement("button");
       d.className = "schip";
       d.style.border = "1px solid #384060"; d.style.background="#242938"; d.style.color="#fff";
-      d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>";
+      var snp = batAtPos(currentKart, j+1);
+      d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>" +
+        (snp ? '<small style="display:block; font-size:11px; color:#c9d2e3; letter-spacing:.5px">'+esc(snp)+'</small>' : '');
       d.onclick = function(){ editTextField(f, label + " date (e.g. 10-25)"); };
       brow.appendChild(d);
-    })(BAT_FIELDS[j][0], BAT_FIELDS[j][1]);
+    })(BAT_FIELDS[j][0], BAT_FIELDS[j][1], j);
   }
+  var sns = batForKart(currentKart);
+  $("batSerials").textContent = sns.length ? ("Scanned in: " + sns.join(", ")) : "";
   /* kart notes */
   var kn = DB.karts[currentKart].knotes || "";
   var kbox = $("knotesBox");
@@ -2139,6 +2553,8 @@ function saveLog(){
   closeLog();
   renderKart(); renderHome();
   toast("Saved — Kart " + currentKart);
+  var nb = partsUseBattery(entry.parts, action);
+  if (nb) openBatUse(currentKart, dateISO, nb);
 }
 
 /* ================= BACKUP ================= */

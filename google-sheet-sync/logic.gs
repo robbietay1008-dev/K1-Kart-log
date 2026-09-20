@@ -10,7 +10,6 @@
 var LOGIC_VER = 'v8.9';
 
 var COUNT_TAB = 'APP COUNT SHEET';
-var BAT_TAB = 'BATTERY TRACKING';
 
 var KART_TABS = (function(){ var a=[]; for (var i=1;i<=53;i++) a.push(String(i)); return a; })();
 
@@ -48,6 +47,7 @@ function handlePost(e) {
         step('needed', function(){ writeNeeded(ss, data.inv); });
         step('order view', function(){ ensureOrderView(ss); });
         step('batteries', function(){ writeBatteryTab(ss, data); });
+        step('battery log', function(){ writeBatteryLog(ss, data); });
         saveJson('lastSync', { at: new Date().toISOString(), build: data.appBuild || '', errs: errs });
         return txt(errs.length ? 'ok with errors: ' + errs.join(' | ') : 'ok');
       }
@@ -127,6 +127,7 @@ function handleGet(e) {
     step3('needed', function () { writeNeeded(ss3, snap3.inv); });
     step3('orderview', function () { ensureOrderView(ss3); });
     step3('batteries', function () { writeBatteryTab(ss3, snap3); });
+    step3('batterylog', function () { writeBatteryLog(ss3, snap3); });
     /* record the outcome so the app's health check reflects reality —
        a stale failure would otherwise keep warning about a fixed problem */
     saveJson('lastSync', { at: new Date().toISOString(),
@@ -219,6 +220,7 @@ function cleanupImpl() {
       step('needed', function(){ writeNeeded(ss, snap.inv); });
       step('order view', function(){ ensureOrderView(ss); });
       step('batteries', function(){ writeBatteryTab(ss, snap); });
+      step('battery log', function(){ writeBatteryLog(ss, snap); });
       phase = 1; kartPos = 0;
     }
     var doneAll = false;
@@ -1170,44 +1172,72 @@ function scanCounts(ss, snap) {
   return filled;
 }
 
-/* ================= BATTERY TRACKING — the corporate paper, filled in by the app =================
-   The K1 "Battery Tracking Sheet" (Center / Date Received, then 30 numbered rows of
-   Serial Number / Kart Number / Date Used / Initials) is drawn on this tab in the
-   same layout so it prints straight from Sheets. Rows come from the app's BATTERIES
-   screen, where each Optima's factory barcode is scanned in: snap.bat is
-   { id: {sn, kart, date (YYYY-MM-DD), ini, c: created ms, at: edited ms} }.
-   One way only, app -> sheet, in scan order. Center and Date Received are typed
-   on the tab by hand and survive every redraw. */
+/* ================= BATTERY TRACKING — the corporate paper, one tab per pallet =================
+   K1's "Battery Tracking Sheet" (Center / Date Received, a title band, then 30
+   numbered rows of Serial Number / Kart Number / Date Used / Initials) is one
+   sheet per delivery. Every battery scanned on the app's BATTERIES screen
+   carries the date it was received, and each received date gets its own tab
+   here — "BATTERIES 09-19-2026" — drawn in the paper's layout so Robbie prints
+   the tab and hands it to his manager once it fills up. Kart / Date Used /
+   Initials arrive later, when the battery is logged into a kart.
+   snap.bat is { id: {sn, rcv (YYYY-MM-DD), kart, date, ini, c, at} }.
+   One way only, app -> sheet. Center (B1) is typed by hand once and copied to
+   every battery tab from then on. */
+var BAT_PREFIX = 'BATTERIES ';
 var BAT_HDR = ['Battery', 'Serial Number', 'Kart Number', 'Date Used', 'Initials'];
-var BAT_MIN_ROWS = 30;      /* the paper has 30 lines; more batteries just add rows */
+var BAT_MIN_ROWS = 30;      /* the paper has 30 lines; a bigger pallet just adds rows */
 
 function batUS(iso) {
   var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
   if (!m) return String(iso || '');
   return (+m[2]) + '/' + (+m[3]) + '/' + m[1];
 }
-function batList(snap) {
-  var bat = (snap && snap.bat) || {}, tomb = (snap && snap.tomb) || {}, out = [];
+function batTabName(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return BAT_PREFIX + (m ? (m[2] + '-' + m[3] + '-' + m[1]) : '(no date)');
+}
+/* batteries grouped by received date, each group in scan order */
+function batGroups(snap) {
+  var bat = (snap && snap.bat) || {}, tomb = (snap && snap.tomb) || {}, groups = {};
   for (var id in bat) {
     var b = bat[id];
     if (!b || tomb[id] || !b.sn) continue;
-    out.push({ sn: String(b.sn), kart: b.kart === undefined || b.kart === null ? '' : String(b.kart),
-               date: batUS(b.date), ini: String(b.ini || ''), c: +b.c || 0, id: id });
+    var key = String(b.rcv || '');
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ sn: String(b.sn), kart: b.kart === undefined || b.kart === null ? '' : String(b.kart),
+                       date: batUS(b.date), ini: String(b.ini || ''), c: +b.c || 0, id: id });
   }
-  out.sort(function (a, b) { return a.c - b.c || (a.id < b.id ? -1 : 1); });
-  return out;
+  var keys = Object.keys(groups).sort();
+  for (var k = 0; k < keys.length; k++)
+    groups[keys[k]].sort(function (a, b) { return a.c - b.c || (a.id < b.id ? -1 : 1); });
+  return { keys: keys, groups: groups };
 }
 function writeBatteryTab(ss, snap) {
-  var list = batList(snap);
-  var sh = ss.getSheetByName(BAT_TAB);
-  var fresh = !sh;
-  if (!sh) sh = ss.insertSheet(BAT_TAB);
-  /* keep what was typed into the two header blanks */
-  var center = '', received = '';
-  if (!fresh && String(sh.getRange(1, 1).getValue() || '').trim() === 'Center:') {
-    center = sh.getRange(1, 2).getValue();
-    received = sh.getRange(1, 5).getValue();
+  var g = batGroups(snap);
+  /* the Center blank is typed once, on any battery tab, and carried to all of them */
+  var center = '', existing = ss.getSheets(), have = {};
+  for (var e = 0; e < existing.length; e++) {
+    var nm = existing[e].getName();
+    if (nm.indexOf(BAT_PREFIX) !== 0) continue;
+    have[nm] = existing[e];
+    if (!center && String(existing[e].getRange(1, 1).getValue() || '').trim() === 'Center:')
+      center = existing[e].getRange(1, 2).getValue();
   }
+  var wanted = {}, total = 0;
+  for (var i = 0; i < g.keys.length; i++) {
+    var key = g.keys[i], name = batTabName(key);
+    wanted[name] = 1;
+    var sh = have[name] || ss.insertSheet(name);
+    drawBatteryPage(sh, g.groups[key], center, batUS(key));
+    total += g.groups[key].length;
+  }
+  /* a received date that no longer has any batteries (all deleted) loses its tab;
+     tabs Robbie has already printed are unaffected because their batteries stay */
+  for (var old in have) if (!wanted[old]) tryOp(function () { ss.deleteSheet(have[old]); });
+  SpreadsheetApp.flush();
+  return total;
+}
+function drawBatteryPage(sh, list, center, received) {
   var n = Math.max(BAT_MIN_ROWS, list.length);
   var rows = [];
   rows.push(['Center:', center, '', 'Date Received:', received]);
@@ -1245,6 +1275,53 @@ function writeBatteryTab(ss, snap) {
     sh.setColumnWidth(4, 120); sh.setColumnWidth(5, 95);
     sh.setHiddenGridlines(true);
   });
+}
+
+/* ---- BATTERY LOG: the permanent record, one row per event ----
+   The per-pallet tabs are the papers; this tab is the paper trail. Every time a
+   battery goes into a kart slot (or comes out because something replaced it)
+   the app appends to that battery's history (b.h = [{k, p, d, i, t, out?}]).
+   Newest first. Batteries that were only received show one "on shelf" row so
+   the tab lists every serial the shop has ever scanned. */
+var BAT_LOG_TAB = 'BATTERY LOG';
+var BAT_LOG_HDR = ['WHEN', 'SERIAL', 'RECEIVED', 'EVENT', 'KART', 'POSITION', 'DATE USED', 'INITIALS', 'NOW IN'];
+function writeBatteryLog(ss, snap) {
+  var bat = (snap && snap.bat) || {}, tomb = (snap && snap.tomb) || {}, rows = [];
+  for (var id in bat) {
+    var b = bat[id];
+    if (!b || tomb[id] || !b.sn) continue;
+    var nowIn = b.kart ? ('kart ' + b.kart + (b.pos ? ' BAT ' + b.pos : '')) : 'shelf';
+    var h = b.h || [];
+    if (!h.length) {
+      rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), b.kart ? 'in kart (no history)' : 'received',
+                 b.kart || '', b.pos || '', batUS(b.date), b.ini || '', nowIn]);
+      continue;
+    }
+    rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), 'received', '', '', '', '', nowIn]);
+    for (var i = 0; i < h.length; i++) {
+      var e = h[i];
+      rows.push([+e.t || 0, String(b.sn), batUS(b.rcv),
+                 e.out ? ('pulled from kart ' + e.out + ' (replaced)') : ('installed'),
+                 e.k || '', e.p || '', batUS(e.d), e.i || '', nowIn]);
+    }
+  }
+  rows.sort(function (a, b) { return b[0] - a[0] || (a[1] < b[1] ? -1 : 1); });
+  for (var r = 0; r < rows.length; r++) {
+    var d = new Date(rows[r][0]);
+    rows[r][0] = rows[r][0] ? ((d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear() + ' ' +
+                               d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes()) : '';
+  }
+  var sh = ss.getSheetByName(BAT_LOG_TAB) || ss.insertSheet(BAT_LOG_TAB);
+  tryOp(function () { sh.clearContents(); });
+  var all = [BAT_LOG_HDR].concat(rows);
+  if (sh.getMaxRows() < all.length) sh.insertRowsAfter(sh.getMaxRows(), all.length - sh.getMaxRows());
+  tryOp(function () { sh.getRange(1, 1, all.length, BAT_LOG_HDR.length).setNumberFormat('@'); });
+  sh.getRange(1, 1, all.length, BAT_LOG_HDR.length).setValues(all);
+  tryOp(function () {
+    sh.getRange(1, 1, 1, BAT_LOG_HDR.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    sh.setColumnWidth(1, 130); sh.setColumnWidth(2, 120); sh.setColumnWidth(4, 220); sh.setColumnWidth(9, 130);
+  });
   SpreadsheetApp.flush();
-  return list.length;
+  return rows.length;
 }
