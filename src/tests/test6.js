@@ -461,7 +461,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('scan-count popup open, scan box focused', await A.page.evaluate(() => $('scanCountModal').className === 'modal open' && document.activeElement === $('scScan')));
   await A.page.type('#scScan', '059014');      /* label with a leading zero, no Enter */
   await sleep(400);
-  ok('leading-zero label finds the part, count starts at 1', await A.page.evaluate(() => sc && sc.num === '59014' && sc.val === 1 && $('scPartWrap').style.display === 'block' && $('scNow').textContent.indexOf('now 20') === 0));
+  ok('leading-zero label finds the part, count starts at 1', await A.page.evaluate(() => sc && sc.num === '59014' && sc.val === 1 && $('scPartWrap').style.display === 'block' && $('scOld').textContent === '20'));
   await A.page.type('#scScan', '59014'); await sleep(320);
   await A.page.type('#scScan', '59014'); await sleep(320);
   ok('same label twice more = 3', await A.page.evaluate(() => sc.val === 3 && $('scVal').textContent === '3'));

@@ -298,9 +298,16 @@
         <span class="pn" id="scNum"></span><span class="pd" id="scName"></span>
         <span class="qbadge q-grey" id="scNow"></span>
       </div>
-      <div style="display:flex; align-items:center; margin-top:10px">
-        <span style="color:#9aa3b5; font-weight:700; font-size:13px; flex:1">COUNT</span>
-        <span id="scVal" style="font-size:40px; font-weight:800; color:#fff; min-width:90px; text-align:right">1</span>
+      <div style="display:flex; align-items:flex-end; margin-top:10px">
+        <span style="flex:1; text-align:center">
+          <span style="display:block; color:#9aa3b5; font-weight:700; font-size:13px">OLD COUNT</span>
+          <span id="scOld" style="font-size:34px; font-weight:800; color:#9aa3b5">0</span>
+        </span>
+        <span style="color:#556; font-size:28px; padding:0 8px 6px">&rarr;</span>
+        <span style="flex:1; text-align:center">
+          <span style="display:block; color:#9aa3b5; font-weight:700; font-size:13px">NEW COUNT</span>
+          <span id="scVal" style="font-size:40px; font-weight:800; color:#fff">1</span>
+        </span>
       </div>
       <div id="scPad" style="display:flex; flex-wrap:wrap; margin-top:8px"></div>
       <div style="display:flex; margin-top:12px">
@@ -2313,8 +2320,9 @@ function scRender(){
   $("scNum").textContent = sc.num;
   $("scName").textContent = c ? c.n : "";
   var now = DB.inv[sc.num] !== undefined ? DB.inv[sc.num] : 0;
-  $("scNow").textContent = "now " + now + (DB.invCounted[sc.num] ? " \u2713" : "");
+  $("scNow").textContent = DB.invCounted[sc.num] ? "\u2713 counted" : "not counted yet";
   $("scNow").className = "qbadge " + (DB.invCounted[sc.num] ? "q-green" : "q-grey");
+  $("scOld").textContent = String(now);
   $("scVal").textContent = String(sc.val);
   $("scPartWrap").style.display = "block";
 }
