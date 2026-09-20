@@ -284,41 +284,28 @@
   </div>
 </div>
 
-<!-- scan-count mode: scan a bin, punch in the count on the pad, next bin -->
+<!-- scan-count mode: scan a label, it counts; keep scanning or type the number; Enter / next scan submits -->
 <div class="modal" id="scanCountModal">
   <div class="mcard" style="min-height:auto; border-radius:18px; margin:24px 14px 0;">
     <div style="display:flex; align-items:center; justify-content:space-between">
       <div class="mtitle" style="margin-bottom:0">Scan count</div>
       <span id="scProgress" style="color:#9aa3b5; font-weight:700; font-size:14px"></span>
     </div>
-    <div class="chiprow" id="scModeRow" style="margin-top:10px"></div>
-    <div id="scScanWrap" style="margin-top:10px">
-      <input type="text" class="in" id="scScan" placeholder="Scan the bin's barcode..." autocapitalize="characters" autocorrect="off" style="font-size:18px">
-      <p id="scHint" style="color:#9aa3b5; font-size:13px; margin:8px 0 0; min-height:18px">Scan a bin. Its part comes up here with a number pad.</p>
-      <div id="scTallyWrap" style="display:none; margin-top:10px">
-        <div class="partitem" style="cursor:default">
-          <span class="pn" id="scTNum"></span><span class="pd" id="scTName"></span>
-          <span id="scTVal" style="font-size:34px; font-weight:800; color:#4caf7a; min-width:60px; text-align:right">0</span>
-        </div>
-        <div style="display:flex; margin-top:8px">
-          <button class="hbtn" id="btnScTMinus" style="flex:1; margin-right:8px">&minus;1</button>
-          <button class="hbtn" id="btnScTSave" style="flex:2">SAVE THIS COUNT</button>
-        </div>
-      </div>
-    </div>
+    <input type="text" class="in" id="scScan" placeholder="Scan a label..." autocapitalize="characters" autocorrect="off" style="font-size:18px; margin-top:10px">
+    <p id="scHint" style="color:#9aa3b5; font-size:13px; margin:8px 0 0; min-height:18px">Scan a part. Same label again = +1, or type the number. Enter, SET, or the next scan submits it.</p>
     <div id="scPartWrap" style="display:none; margin-top:10px">
       <div class="partitem" style="cursor:default">
         <span class="pn" id="scNum"></span><span class="pd" id="scName"></span>
         <span class="qbadge q-grey" id="scNow"></span>
       </div>
       <div style="display:flex; align-items:center; margin-top:10px">
-        <span style="color:#9aa3b5; font-weight:700; font-size:13px; flex:1">NEW COUNT</span>
-        <span id="scVal" style="font-size:40px; font-weight:800; color:#fff; min-width:90px; text-align:right">0</span>
+        <span style="color:#9aa3b5; font-weight:700; font-size:13px; flex:1">COUNT</span>
+        <span id="scVal" style="font-size:40px; font-weight:800; color:#fff; min-width:90px; text-align:right">1</span>
       </div>
       <div id="scPad" style="display:flex; flex-wrap:wrap; margin-top:8px"></div>
       <div style="display:flex; margin-top:12px">
         <button class="hbtn" id="btnScSkip" style="flex:1; margin-right:10px">Skip</button>
-        <button class="hbtn red" id="btnScSet" style="flex:2">SET COUNT &amp; NEXT</button>
+        <button class="hbtn red" id="btnScSet" style="flex:2">SET (Enter)</button>
       </div>
     </div>
     <div class="mactions">
@@ -725,7 +712,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0920-1343";
+var APP_BUILD = "0920-1347";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -2293,44 +2280,10 @@ var invEFits = "";
 function invEFitsGet(){ return invEFits; }
 function invEFitsSet(v){ invEFits = v; }
 /* ================= SCAN-COUNT MODE ================= */
-var sc = null;   /* { num } while a part is up, null while waiting for a scan */
+var sc = null;        /* { num, val, typed } — the part that's up; null when nothing is */
 var scTimer = null;
-var scTally = null;   /* tally mode: { num, n } — the part being tallied and how many scans so far */
-function scMode(){ return DB.meta.scMode === "tally" ? "tally" : "bin"; }
-function scRenderMode(){
-  var row = $("scModeRow"); row.innerHTML = "";
-  [["bin", "BIN — scan, type the count"], ["tally", "TALLY — each scan = 1"]].forEach(function(o){
-    var c = document.createElement("button");
-    c.className = "chip" + (scMode() === o[0] ? " on" : "");
-    c.textContent = o[1];
-    c.onclick = function(){ scTallySave(); DB.meta.scMode = o[0]; saveQuiet(); scRenderMode(); scHintDefault(); scFocus(); };
-    row.appendChild(c);
-  });
-  $("scScan").placeholder = scMode() === "tally" ? "Scan each part..." : "Scan the bin's barcode...";
-}
-function scHintDefault(){
-  $("scHint").textContent = scMode() === "tally" ? "Scan every piece. Same part again = +1; a different part saves the last one and starts fresh."
-                                                 : "Scan a bin. Its part comes up here with a number pad.";
-  $("scTallyWrap").style.display = (scMode() === "tally" && scTally) ? "block" : "none";
-}
-function scTallyShow(){
-  if (!scTally){ $("scTallyWrap").style.display = "none"; return; }
-  var c = DB.invCfg[scTally.num];
-  $("scTNum").textContent = scTally.num; $("scTName").textContent = c ? c.n : "";
-  $("scTVal").textContent = String(scTally.n);
-  $("scTallyWrap").style.display = "block";
-}
-function scTallySave(){
-  if (!scTally) return;
-  DB.inv[scTally.num] = scTally.n; DB.invTouched[scTally.num] = Date.now(); DB.invCounted[scTally.num] = 1;
-  var msg = scTally.num + " = " + scTally.n;
-  scTally = null;
-  save(); scProgress(); renderInv();
-  $("scHint").textContent = "Saved " + msg + " \u2713";
-  scTallyShow();
-}
 function scMatchPart(raw){
-  /* the bin label carries the part number; tolerate leading zeros either way */
+  /* the label carries the part number; tolerate leading zeros either way */
   var q = String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9\-\/]/g, "");
   if (!q) return "";
   if (DB.invCfg[q]) return q;
@@ -2339,49 +2292,51 @@ function scMatchPart(raw){
   for (var z=1; z<=3; z++){ var pad = new Array(z+1).join("0") + bare; if (DB.invCfg[pad]) return pad; }
   return "";
 }
-function scFocus(){ setTimeout(function(){ try { if ($("scanCountModal").className.indexOf("open") > -1 && !sc) $("scScan").focus(); } catch(e){} }, 30); }
+function scFocus(){ setTimeout(function(){ try { if ($("scanCountModal").className.indexOf("open") > -1) $("scScan").focus(); } catch(e){} }, 30); }
 function scProgress(){
   var total = 0, counted = 0;
   for (var n in DB.invCfg){ total++; if (DB.invCounted[n]) counted++; }
   $("scProgress").textContent = counted + " / " + total + " counted";
 }
 function openScanCount(){
-  sc = null; scTally = null;
-  scRenderMode();
-  $("scScan").value = ""; scHintDefault();
-  $("scScanWrap").style.display = "block"; $("scPartWrap").style.display = "none";
+  sc = null;
+  $("scScan").value = "";
+  $("scHint").textContent = "Scan a part. Same label again = +1, or type the number. Enter, SET, or the next scan submits it.";
+  $("scPartWrap").style.display = "none";
   scProgress();
   $("scanCountModal").className = "modal open";
   scFocus();
 }
+function scRender(){
+  if (!sc){ $("scPartWrap").style.display = "none"; return; }
+  var c = DB.invCfg[sc.num];
+  $("scNum").textContent = sc.num;
+  $("scName").textContent = c ? c.n : "";
+  var now = DB.inv[sc.num] !== undefined ? DB.inv[sc.num] : 0;
+  $("scNow").textContent = "now " + now + (DB.invCounted[sc.num] ? " \u2713" : "");
+  $("scNow").className = "qbadge " + (DB.invCounted[sc.num] ? "q-green" : "q-grey");
+  $("scVal").textContent = String(sc.val);
+  $("scPartWrap").style.display = "block";
+}
+function scSubmit(){
+  if (!sc) return false;
+  var v = parseInt(sc.val, 10); if (isNaN(v) || v < 0) v = 0;
+  DB.inv[sc.num] = v; DB.invTouched[sc.num] = Date.now(); DB.invCounted[sc.num] = 1;
+  $("scHint").textContent = "Saved " + sc.num + " = " + v + " \u2713";
+  sc = null;
+  save(); scProgress(); renderInv(); scRender();
+  return true;
+}
 function scTake(){
   var raw = $("scScan").value;
-  if (!String(raw).trim()) return;
-  var num = scMatchPart(raw);
   $("scScan").value = "";
+  if (!String(raw).trim()){ scSubmit(); scFocus(); return; }   /* bare Enter = submit */
+  var num = scMatchPart(raw);
   if (!num){ $("scHint").textContent = "No part numbered \"" + String(raw).trim() + "\" — add it with + PART first."; toast("Not a part number: " + String(raw).trim(), true); scFocus(); return; }
-  if (scMode() === "tally"){
-    if (scTally && scTally.num !== num) scTallySave();
-    if (!scTally) scTally = { num: num, n: 0 };
-    scTally.n++;
-    $("scHint").textContent = num + " \u2192 " + scTally.n;
-    scTallyShow(); scFocus();
-    return;
-  }
-  scShow(num);
-}
-$("btnScTMinus").onclick = function(){ if (scTally && scTally.n > 0){ scTally.n--; scTallyShow(); } scFocus(); };
-$("btnScTSave").onclick = function(){ scTallySave(); scFocus(); };
-function scShow(num){
-  sc = { num: num, val: "" };
-  var c = DB.invCfg[num];
-  $("scNum").textContent = num;
-  $("scName").textContent = c ? c.n : "";
-  var now = DB.inv[num] !== undefined ? DB.inv[num] : 0;
-  $("scNow").textContent = "now " + now + (DB.invCounted[num] ? " \u2713" : "");
-  $("scNow").className = "qbadge " + (DB.invCounted[num] ? "q-green" : "q-grey");
-  $("scVal").textContent = "0";
-  $("scScanWrap").style.display = "none"; $("scPartWrap").style.display = "block";
+  if (sc && sc.num === num){ sc.val = (parseInt(sc.val, 10) || 0) + 1; sc.typed = false; }
+  else { if (sc) scSubmit(); sc = { num: num, val: 1, typed: false }; }
+  $("scHint").textContent = num + " \u2192 " + sc.val;
+  scRender(); scFocus();
 }
 function scRenderPad(){
   var pad = $("scPad"); pad.innerHTML = "";
@@ -2394,10 +2349,14 @@ function scRenderPad(){
       b.textContent = k;
       b.onclick = function(){
         if (!sc) return;
-        if (k === "\u232B") sc.val = sc.val.slice(0, -1);
-        else if (k === "+1") sc.val = String((parseInt(sc.val || "0", 10) || 0) + 1);
-        else if (sc.val.length < 5) sc.val = (sc.val === "0" ? "" : sc.val) + k;
-        $("scVal").textContent = sc.val || "0";
+        var cur = String(sc.val);
+        if (k === "\u232B") cur = cur.slice(0, -1) || "0";
+        else if (k === "+1") cur = String((parseInt(cur, 10) || 0) + 1);
+        else { if (!sc.typed || cur === "0") cur = ""; if (cur.length < 5) cur += k; }
+        sc.typed = (k !== "+1");
+        sc.val = cur === "" ? 0 : parseInt(cur, 10);
+        $("scVal").textContent = String(sc.val);
+        scFocus();
       };
       pad.appendChild(b);
     })(keys[i]);
@@ -2408,27 +2367,12 @@ $("scScan").addEventListener("keydown", function(ev){
   var k = ev.keyCode || ev.which;
   if (k === 13 || k === 9 || k === 32){ ev.preventDefault(); clearTimeout(scTimer); scTake(); }
 });
-/* part numbers are different lengths, so the scan is taken once the scanner stops typing */
+/* part numbers are different lengths, so a scan is taken once the scanner stops typing */
 $("scScan").addEventListener("input", function(){ clearTimeout(scTimer); scTimer = setTimeout(scTake, 250); });
-$("btnScSet").onclick = function(){
-  if (!sc) return;
-  var v = parseInt(sc.val || "0", 10);
-  if (isNaN(v) || v < 0) v = 0;
-  DB.inv[sc.num] = v; DB.invTouched[sc.num] = Date.now(); DB.invCounted[sc.num] = 1;
-  save();
-  var done = sc.num + " = " + v; sc = null;
-  $("scHint").textContent = "Saved " + done + " \u2713  — scan the next bin.";
-  $("scPartWrap").style.display = "none"; $("scScanWrap").style.display = "block";
-  scProgress(); renderInv(); scFocus();
-};
-$("btnScSkip").onclick = function(){
-  sc = null;
-  $("scHint").textContent = "Skipped — scan the next bin.";
-  $("scPartWrap").style.display = "none"; $("scScanWrap").style.display = "block";
-  scFocus();
-};
-$("btnScDone").onclick = function(){ scTallySave(); $("scanCountModal").className = "modal"; sc = null; renderInv(); };
-$("scScan").addEventListener("blur", function(){ if (!sc && $("scanCountModal").className.indexOf("open") > -1) scFocus(); });
+$("btnScSet").onclick = function(){ scSubmit(); scFocus(); };
+$("btnScSkip").onclick = function(){ sc = null; $("scHint").textContent = "Skipped."; scRender(); scFocus(); };
+$("btnScDone").onclick = function(){ scSubmit(); $("scanCountModal").className = "modal"; sc = null; renderInv(); };
+$("scScan").addEventListener("blur", function(){ if ($("scanCountModal").className.indexOf("open") > -1) scFocus(); });
 scRenderPad();
 
 function openInvModal(num){
