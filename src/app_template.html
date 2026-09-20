@@ -323,21 +323,36 @@
     </div>
   </div>
   <div class="searchwrap">
-    <label class="f">DATE RECEIVED &mdash; the batch these scans go on</label>
-    <div style="display:flex; margin-bottom:8px">
-      <input type="date" class="in" id="batDefRcv" style="flex:1">
-    </div>
-    <div style="display:flex">
-      <input type="text" class="in" id="batScan" placeholder="Scan barcode or type serial, then Enter" autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
-      <button class="hbtn red" id="btnBatAdd" style="min-height:48px; padding:0 16px">ADD</button>
-    </div>
-    <p style="color:#9aa3b5; font-size:12px; margin:6px 0 0">Scan every battery when a pallet comes in. Each received date becomes its own BATTERIES tab on the sheet, laid out like the corporate paper &mdash; print it when it's full. Kart #, date used and initials fill in later, when the battery is logged into a kart.</p>
+    <button class="bigbtn" id="btnBatBatch" style="margin-top:0">&#128267; RECEIVE A BATCH (scan them in)</button>
+    <p style="color:#9aa3b5; font-size:12px; margin:8px 0 0">Pick the received date, then scan one after another. Each received date is its own BATTERIES tab on the sheet, laid out like the corporate paper. Kart #, date used and initials fill in later, when the battery is logged into a kart.</p>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:10px">
       <span id="batProgress" style="color:#9aa3b5; font-weight:700; font-size:14px"></span>
       <input type="search" class="in" id="batSearch" placeholder="Find serial / kart" style="width:46%; min-height:40px">
     </div>
   </div>
   <div class="kd" id="batList"></div>
+</div>
+
+<!-- receive a batch: scan after scan, nothing to touch -->
+<div class="modal" id="batBatchModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:30px 14px 0;">
+    <div class="mtitle">Receive a batch</div>
+    <label class="f">DATE RECEIVED</label>
+    <input type="date" class="in" id="batDefRcv">
+    <div style="display:flex; align-items:center; margin-top:12px">
+      <input type="text" class="in" id="batScan" placeholder="Scan the barcode..." autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
+      <button class="hbtn" id="btnBatAdd" style="min-height:48px; padding:0 14px">ADD</button>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-top:12px">
+      <span style="font-size:15px; color:#9aa3b5; font-weight:700">THIS BATCH</span>
+      <span id="batBatchCount" style="font-size:34px; font-weight:800; color:#4caf7a">0</span>
+    </div>
+    <div id="batBatchList" style="max-height:32vh; overflow:auto; margin-top:6px"></div>
+    <p id="batBatchLast" style="color:#9aa3b5; font-size:13px; margin-top:8px; min-height:18px"></p>
+    <div class="mactions">
+      <button class="hbtn red" id="btnBatBatchDone" style="width:100%">DONE</button>
+    </div>
+  </div>
 </div>
 
 <!-- battery edit modal -->
@@ -1214,22 +1229,45 @@ function batClean(v){
   /* scanners sometimes prefix/suffix junk; keep letters+digits only */
   return String(v||"").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
+var batBatch = null;   /* ids scanned in the open batch popup */
+function batFocusScan(){ setTimeout(function(){ try { if (batBatch) $("batScan").focus(); } catch(e){} }, 30); }
+function openBatBatch(){
+  batBatch = [];
+  if (!$("batDefRcv").value) $("batDefRcv").value = todayISO();
+  $("batScan").value = ""; $("batBatchLast").textContent = "";
+  renderBatBatch();
+  $("batBatchModal").className = "modal open";
+  batFocusScan();
+}
+function renderBatBatch(){
+  $("batBatchCount").textContent = String(batBatch.length);
+  var el = $("batBatchList"); el.innerHTML = "";
+  for (var i=batBatch.length-1; i>=0; i--){
+    var b = DB.bat[batBatch[i]]; if (!b) continue;
+    var d = document.createElement("div");
+    d.className = "partitem";
+    d.innerHTML = '<span class="pn">#' + batNumber(batBatch[i]) + '</span><span class="pd" style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>';
+    el.appendChild(d);
+  }
+}
 function batAddFromScan(){
   var inp = $("batScan");
   var sn = batClean(inp.value);
   inp.value = "";
-  if (!sn){ inp.focus(); return; }
-  if (sn.length < 6){ toast("That doesn't look like a serial: " + sn, true); inp.focus(); return; }
+  if (!sn){ batFocusScan(); return; }
+  if (sn.length < 6){ $("batBatchLast").textContent = "Not a serial: " + sn; toast("That doesn't look like a serial: " + sn, true); batFocusScan(); return; }
   var have = batBySn(sn);
   if (have){
-    toast("Already scanned — #" + batNumber(have) + ". Tap it to change.", true);
-    renderBat(); inp.focus(); return;
+    var msg = (batBatch.indexOf(have) > -1) ? "Already in this batch: " + sn : "Already scanned in (received " + isoToUS(DB.bat[have].rcv) + "): " + sn;
+    $("batBatchLast").textContent = msg; toast(msg, true);
+    batFocusScan(); return;
   }
   var rcv = $("batDefRcv").value || todayISO();
   var id = batCreate(sn, rcv);
-  save(); renderBat();
-  toast("#" + batNumber(id) + "  " + sn + "  (received " + isoToUS(rcv) + ")");
-  inp.focus();
+  batBatch.push(id);
+  save(); renderBatBatch();
+  $("batBatchLast").textContent = "Added " + sn + " to " + isoToUS(rcv);
+  batFocusScan();
 }
 function batCreate(sn, rcv){
   var now = Date.now();
@@ -1289,10 +1327,18 @@ function openBatModal(id){
 }
 $("btnBat").onclick = function(){
   $("batSearch").value = "";
-  if (!$("batDefRcv").value) $("batDefRcv").value = todayISO();
   renderBat(); showScreen("scrBat"); window.scrollTo(0,0);
-  setTimeout(function(){ try { $("batScan").focus(); } catch(e){} }, 50);
 };
+$("btnBatBatch").onclick = openBatBatch;
+$("btnBatBatchDone").onclick = function(){
+  var n = batBatch ? batBatch.length : 0;
+  $("batBatchModal").className = "modal"; batBatch = null;
+  renderBat();
+  if (n) toast(n + (n > 1 ? " batteries" : " battery") + " received");
+};
+/* the scanner is a keyboard: keep the cursor in the scan box for as long as the popup is open */
+$("batScan").addEventListener("blur", function(){ if (batBatch && document.activeElement !== $("batDefRcv")) batFocusScan(); });
+$("batDefRcv").addEventListener("change", batFocusScan);
 $("btnBack5").onclick = function(){ showScreen("scrHome"); renderHome(); };
 $("btnBatAdd").onclick = batAddFromScan;
 $("batScan").addEventListener("keydown", function(ev){

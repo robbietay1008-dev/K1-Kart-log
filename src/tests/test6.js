@@ -171,33 +171,37 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.click('#btnBat');
   await sleep(150);
   ok('BATTERIES screen opens', await A.page.evaluate(() => $('scrBat').className.indexOf('active') > -1));
-  ok('scan box has focus', await A.page.evaluate(() => document.activeElement === $('batScan')));
-  ok('date received defaults to today', await A.page.evaluate(() => $('batDefRcv').value === todayISO()));
+  await A.page.click('#btnBatBatch');
+  await sleep(150);
+  ok('batch popup open, scan box focused, date defaults to today', await A.page.evaluate(() => $('batBatchModal').className === 'modal open' && document.activeElement === $('batScan') && $('batDefRcv').value === todayISO()));
   await A.page.fill('#batDefRcv', '2026-09-19');
   await A.page.type('#batScan', '6180409549');
   await A.page.keyboard.press('Enter');
-  let s = await A.page.evaluate(() => { const l = batSorted(); return { n: l.length, b: l[0] && l[0].b, box: $('batScan').value }; });
+  let s = await A.page.evaluate(() => { const l = batSorted(); return { n: l.length, b: l[0] && l[0].b, box: $('batScan').value, cnt: $('batBatchCount').textContent, focused: document.activeElement === $('batScan') }; });
   ok('one battery on the 9/19 pallet, nothing filled in yet', s.n === 1 && s.b.sn === '6180409549' && s.b.rcv === '2026-09-19' && s.b.kart === '' && s.b.date === '' && s.b.ini === '', s);
-  ok('scan box cleared for the next one', s.box === '');
-  ok('row shows #1, the serial and "on the shelf"', /#1/.test(await A.page.textContent('#batList')) && /6180409549/.test(await A.page.textContent('#batList')) && /on the shelf/.test(await A.page.textContent('#batList')));
-
+  ok('box cleared, count 1, still focused for the next scan', s.box === '' && s.cnt === '1' && s.focused, s);
   await A.page.type('#batScan', '6180409549');
   await A.page.keyboard.press('Enter');
-  ok('re-scanning the same serial is refused', await A.page.evaluate(() => batSorted().length) === 1 && (await toast(A)).indexOf('Already scanned') > -1, await toast(A));
-
+  ok('re-scanning the same serial is refused', await A.page.evaluate(() => batSorted().length) === 1 && (await A.page.textContent('#batBatchLast')).indexOf('Already in this batch') > -1);
   await A.page.type('#batScan', '6180405554\r');
   await A.page.keyboard.press('Tab');
   ok('Tab / stray CR handled', await A.page.evaluate(() => batSorted().length) === 2 && await A.page.evaluate(() => batSorted()[1].b.sn) === '6180405554');
   await A.page.type('#batScan', '123');
   await A.page.keyboard.press('Enter');
   ok('a 3-digit scan is rejected', await A.page.evaluate(() => batSorted().length) === 2);
+  await A.page.click('#btnBatBatchDone');
+  ok('DONE closes the popup and the list shows both', await A.page.evaluate(() => $('batBatchModal').className === 'modal' && $('batList').children.length === 2));
+  ok('rows say "on the shelf"', /on the shelf/.test(await A.page.textContent('#batList')));
 
   /* a second pallet a week later */
+  await A.page.click('#btnBatBatch');
+  await sleep(100);
   await A.page.fill('#batDefRcv', '2026-09-26');
   await A.page.type('#batScan', '6180407777');
   await A.page.keyboard.press('Enter');
   s = await A.page.evaluate(() => ({ n: batSorted().length, num: batNumber(batSorted()[2].id), rcv: batSorted()[2].b.rcv }));
   ok('second pallet starts numbering at #1 again', s.n === 3 && s.num === 1 && s.rcv === '2026-09-26', s);
+  await A.page.click('#btnBatBatchDone');
 
   /* ---------- 2. logging a battery into a kart pops the pairing box ---------- */
   console.log('\n2. log work that used a battery');
