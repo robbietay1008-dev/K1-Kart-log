@@ -287,6 +287,19 @@
   </div>
 </div>
 
+<!-- parts a mechanic scanned off the shelf, offered back when they log the work -->
+<div class="modal" id="pulledModal" style="z-index:60">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle" id="pulledTitle">Parts you pulled</div>
+    <p style="color:#9aa3b5; font-size:13px; margin-bottom:8px">These were scanned off the shelf under your name. Untick any that weren't for this job.</p>
+    <div id="pulledList"></div>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnPulledSkip" style="flex:1; margin-right:10px">Not now</button>
+      <button class="hbtn red" id="btnPulledAdd" style="flex:2">ADD TO PARTS USED</button>
+    </div>
+  </div>
+</div>
+
 <!-- scan-count mode: scan a label, it counts; keep scanning or type the number; Enter / next scan submits -->
 <div class="modal" id="scanCountModal">
   <div class="mcard" style="min-height:auto; border-radius:18px; margin:24px 14px 0;">
@@ -2436,6 +2449,55 @@ function renderPullBar(){
   };
 }
 
+/* what a mechanic has scanned off the shelf and not yet put on a log */
+function pulledFor(mech){
+  var out = {}, cutoff = Date.now() - 7*86400000;
+  for (var j=0;j<DB.shop.length;j++){
+    var e = DB.shop[j];
+    if (e.usedFor !== PULL_TAG || (e.mechanic || "") !== (mech || "")) continue;
+    var d = new Date(e.date); if (!isNaN(d) && d.getTime() < cutoff) continue;
+    var its = parsePartsString(e.parts);
+    for (var k=0;k<its.length;k++) out[its[k].num] = (out[its[k].num] || 0) + its[k].qty;
+  }
+  return out;
+}
+var pulledOffer = null;
+function offerPulled(mech){
+  var q = pulledFor(mech), nums = [];
+  for (var n in q) nums.push(n);
+  if (!nums.length) return;
+  /* don't offer what's already on the form */
+  var have = {};
+  for (var i=0;i<selectedParts.length;i++) have[selectedParts[i].num.toUpperCase()] = 1;
+  nums = nums.filter(function(n){ return !have[n.toUpperCase()]; });
+  if (!nums.length) return;
+  pulledOffer = { mech: mech, rows: nums.map(function(n){ return { num: n, qty: q[n], on: true }; }) };
+  $("pulledTitle").textContent = "Parts " + mech + " pulled";
+  var el = $("pulledList"); el.innerHTML = "";
+  pulledOffer.rows.forEach(function(r){
+    var p = partRow(r.num);
+    var d = document.createElement("div");
+    d.className = "partitem";
+    d.style.borderColor = "#1d7a3e";
+    d.innerHTML = '<span class="pn">&#10003;</span><span class="pd"><b style="color:#fff">' + esc(r.num) + '</b> ' + esc(p ? pname(p) : "") + '</span><span class="qbadge q-green">&times;' + r.qty + '</span>';
+    d.onclick = function(){ r.on = !r.on; d.style.borderColor = r.on ? "#1d7a3e" : "#384060"; d.querySelector(".pn").innerHTML = r.on ? "&#10003;" : "&nbsp;&nbsp;"; };
+    el.appendChild(d);
+  });
+  $("pulledModal").className = "modal open";
+}
+$("btnPulledSkip").onclick = function(){ $("pulledModal").className = "modal"; pulledOffer = null; };
+$("btnPulledAdd").onclick = function(){
+  if (!pulledOffer) return;
+  pulledOffer.rows.forEach(function(r){
+    if (!r.on) return;
+    var p = partRow(r.num);
+    selectedParts.push({ num: r.num, desc: p ? pname(p) : "", qty: r.qty });
+  });
+  renderSelParts();
+  $("pulledModal").className = "modal"; pulledOffer = null;
+  toast("Added — stock was already taken when they were scanned");
+};
+
 /* ================= SCAN-COUNT MODE ================= */
 var sc = null;        /* { num, val, typed } — the part that's up; null when nothing is */
 var scTimer = null;
@@ -3048,7 +3110,7 @@ function renderMechRow(){
       var c = document.createElement("button");
       c.className = "chip" + (selectedMech===m ? " on" : "");
       c.textContent = m;
-      c.onclick = function(){ selectedMech = m; renderMechRow(); };
+      c.onclick = function(){ selectedMech = m; renderMechRow(); offerPulled(m); };
       row.appendChild(c);
     })(DB.mechanics[i]);
   }

@@ -495,16 +495,27 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await scan('K1-UNDO');
   s = await A.page.evaluate(() => ({ b: DB.inv['SAK-6011'], p: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts }));
   ok('undo puts the last one back', s.b === 10 && s.p === '59014 x2', s);
-  /* logging the work on a kart with those parts does not take stock twice */
+  /* logging the work: picking the name offers the queued parts; approving fills them in */
   await A.page.evaluate(() => openKart('7'));
   await A.page.click('#btnLog');
   await A.page.fill('#fDate', '2026-09-21');
   await A.page.fill('#fAction', 'brake cables');
-  await A.page.evaluate(() => { selectedParts.push({ num: '59014', qty: 3 }); renderSelParts(); selectedMech = 'ROBERT'; renderMechRow(); });
+  await A.page.evaluate(() => { const chips = Array.from($('mechRow').children); chips.find(c => c.textContent === 'ROBERT').click(); });
+  await sleep(100);
+  ok('picking ROBERT offers his queued parts', await A.page.evaluate(() => $('pulledModal').className === 'modal open' && pulledOffer.rows.length === 1 && pulledOffer.rows[0].num === '59014' && pulledOffer.rows[0].qty === 2));
+  await A.page.click('#btnPulledAdd');
+  ok('approved parts land in PARTS USED as 59014 x2', await A.page.evaluate(() => selectedParts.length === 1 && selectedParts[0].num === '59014' && selectedParts[0].qty === 2));
+  await A.page.evaluate(() => { selectedParts[0].qty = 3; renderSelParts(); });   /* he actually used one more */
   await A.page.click('#btnSaveLog');
   await sleep(120);
   s = await A.page.evaluate(() => ({ a: DB.inv['59014'], pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').length, e: DB.karts['7'].entries[DB.karts['7'].entries.length - 1].parts }));
   ok('log of 59014 x3: 2 came from the pull, only 1 more leaves stock; pull entry consumed', s.a === 17 && s.pulls === 0 && s.e === '59014 x3', s);
+  await A.page.evaluate(() => openKart('7'));
+  await A.page.click('#btnLog');
+  await A.page.evaluate(() => { const chips = Array.from($('mechRow').children); chips.find(c => c.textContent === 'ROBERT').click(); });
+  await sleep(100);
+  ok('nothing queued → no offer', await A.page.evaluate(() => $('pulledModal').className === 'modal'));
+  await A.page.click('#btnCancelLog');
   /* a scan while a popup is open is NOT a pull */
   await A.page.evaluate(() => { showScreen('scrHome'); renderHome(); $('btnInv').click(); });
   await A.page.click('#btnInvScan'); await sleep(100);
