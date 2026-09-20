@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.12';
+var LOGIC_VER = 'v8.13';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -1212,9 +1212,10 @@ function batTabFor(ss, iso) {
 function batteryFormPage(e) {
   var iso = String(e.parameter.date || '');
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sh = batTabFor(ss, iso);
+  var blank = iso === 'form';
+  var sh = blank ? ss.getSheetByName(BAT_FORM_TAB) : batTabFor(ss, iso);
   if (!sh) return HtmlService.createHtmlOutput('<p style="font-family:sans-serif">No form on the sheet for ' + batUS(iso) + '.</p>');
-  var fname = 'Battery Tracking Sheet ' + batTabName(iso).substring(BAT_PREFIX.length) + '.pdf';
+  var fname = 'Battery Tracking Sheet ' + (blank ? 'blank' : batTabName(iso).substring(BAT_PREFIX.length)) + '.pdf';
   var url = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?format=pdf&gid=' + sh.getSheetId() +
             '&size=letter&portrait=true&fitw=true&gridlines=false&printtitle=false&sheetnames=false&pagenum=UNDEFINED' +
             '&top_margin=0.6&bottom_margin=0.6&left_margin=0.6&right_margin=0.6&horizontal_alignment=CENTER';
@@ -1229,9 +1230,9 @@ function batteryFormPage(e) {
     '<p style="color:#555; margin:0 0 18px">The form as it is on the sheet right now' + (sh.getName().indexOf(BAT_DONE_MARK) > -1 ? ' &mdash; <b style="color:#1d7a3e">complete</b>' : ' &mdash; <b style="color:#b36b00">not complete yet</b>') + '.</p>' +
     '<p><a id="dl" download="' + fname + '" href="data:application/pdf;base64,' + b64 + '" style="display:inline-block; background:#e10a17; color:#fff; padding:14px 22px; border-radius:10px; text-decoration:none; font-weight:700; font-size:17px">Download PDF</a></p>' +
     '<p style="color:#777; font-size:13px">If the download did not start by itself, tap the button. On the iPad the PDF opens in Safari &mdash; use Share to save it.</p>' +
-    '<hr style="margin:26px 0; border:0; border-top:1px solid #ddd">' +
+    (blank ? '' : '<hr style="margin:26px 0; border:0; border-top:1px solid #ddd">' +
     '<p style="color:#555">Once the PDF is saved you can take this form off the sheet. The batteries, their kart history and BATTERY LOG are kept; only the tab goes.</p>' +
-    '<p><a href="' + self + '?mode=formwipe&date=' + iso + '" onclick="return confirm(\'Wipe the ' + batUS(iso) + ' form off the sheet?\')" style="display:inline-block; background:#2f3546; color:#fff; padding:12px 20px; border-radius:10px; text-decoration:none; font-weight:700">Wipe this form from the sheet</a></p>' +
+    '<p><a href="' + self + '?mode=formwipe&date=' + iso + '" onclick="return confirm(\'Wipe the ' + batUS(iso) + ' form off the sheet?\')" style="display:inline-block; background:#2f3546; color:#fff; padding:12px 20px; border-radius:10px; text-decoration:none; font-weight:700">Wipe this form from the sheet</a></p>') +
     '<script>setTimeout(function(){ try { document.getElementById("dl").click(); } catch(e){} }, 400);</script>' +
     '</body></html>';
   return HtmlService.createHtmlOutput(html).setTitle(fname);
