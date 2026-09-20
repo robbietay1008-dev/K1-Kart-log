@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.9';
+var LOGIC_VER = 'v8.10';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
