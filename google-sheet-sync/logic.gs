@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.17';
+var LOGIC_VER = 'v8.18';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -24,6 +24,17 @@ function handlePost(e) {
       if (data.type === 'count') { return txt(writeCountRows(SpreadsheetApp.getActiveSpreadsheet(), data)); }
       if (data.type === 'snapshot') {
         var ss = SpreadsheetApp.getActiveSpreadsheet();
+        /* A device still running an old copy of the app doesn't know about
+           newer sections (batteries, part config...). It sends the snapshot
+           without those keys, and taking that at face value wiped the
+           batteries once (9/20). Anything the sender didn't send at all is
+           kept from the stored snapshot instead of being blanked. */
+        var prev = loadJson('snapshot', {}) || {};
+        var keep = ['quicks','inv','tomb','stamps','invTouched','rc','invCounted','invCfg','parts','cfgTouched','partTomb','rekeys','bat'];
+        for (var ki = 0; ki < keep.length; ki++) {
+          if (data[keep[ki]] === undefined && prev[keep[ki]] !== undefined) data[keep[ki]] = prev[keep[ki]];
+        }
+        if (data.bat === undefined) data.bat = {};
         saveJson('snapshot', { savedAt: new Date().toISOString(), appBuild: data.appBuild || '',
                                karts: data.karts, shop: data.shop || [],
                                quicks: data.quicks || [], inv: data.inv || {},
@@ -166,9 +177,13 @@ function handleGet(e) {
       try { var r = fn(); SpreadsheetApp.flush(); out.push(label + ': ok' + (r === undefined ? '' : ' -> ' + r)); }
       catch (ep) { out.push(label + ': FAIL ' + ep); }
     };
-    probe('clearContents', function () { t.clearContents(); });
-    probe('setNumberFormat D', function () { t.getRange('D:D').setNumberFormat('@'); });
-    probe('setValues A1', function () { t.getRange(1, 1, 1, 2).setValues([['DATE', 'KART']]); });
+    if (e.parameter.probe === 'yes') {   /* wipes the tab: only on request */
+      probe('clearContents', function () { t.clearContents(); });
+      probe('setNumberFormat D', function () { t.getRange('D:D').setNumberFormat('@'); });
+      probe('setValues A1', function () { t.getRange(1, 1, 1, 2).setValues([['DATE', 'KART']]); });
+    }
+    var ls = loadJson('lastSync', null);
+    out.push('lastSync: ' + (ls ? ls.at + ' build ' + ls.build + (ls.errs && ls.errs.length ? ' errs ' + ls.errs.join('|') : '') : 'none'));
     if (e.parameter.drop === 'yes') {
       probe('deleteSheet', function () { ssd.deleteSheet(t); });
       probe('recreate', function () { ssd.insertSheet(tname, 1); return 'made'; });
