@@ -383,6 +383,11 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('battery log still has 9549', tabs['BATTERY LOG']._g.some(r => r[1] === '6180409549'));
   vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-09-19', undo: '1' } })`, sandbox);
   ok('undo brings the tab back', !!(tabs['BATTERIES 09-19-2026'] || tabs['BATTERIES 09-19-2026 \u2713']));
+  /* wiping a date whose batteries are all gone removes its kept blank tab too */
+  vm.runInContext(`(function(){ var __ss = SpreadsheetApp.getActiveSpreadsheet(); __ss.insertSheet('BATTERIES 01-05-2026'); })()`, sandbox);
+  vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-01-05' } })`, sandbox);
+  ok('an emptied tab can be wiped', !tabs['BATTERIES 01-05-2026']);
+  vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-01-05', undo: '1' } })`, sandbox);
   await A.page.evaluate(() => { const id = batBySn('6180409549'); batAssign(id, '', '', '', ''); DB.bat[id].date = ''; DB.bat[id].ini = ''; save(); });
   await push(A);
 

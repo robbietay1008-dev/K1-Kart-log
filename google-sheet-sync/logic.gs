@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.14';
+var LOGIC_VER = 'v8.15';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -1250,6 +1250,11 @@ function batteryFormWipe(e) {
   return txt((e.parameter.undo === '1' ? 'form restored: ' : 'form wiped from the sheet: ') + batUS(iso) +
              ' [' + LOGIC_VER + ']  (undo: add &undo=1 to this address)');
 }
+/* 'BATTERIES 09-16-2026 ✓' -> '2026-09-16' */
+function batTabIso(name) {
+  var m = /^BATTERIES (\d{2})-(\d{2})-(\d{4})/.exec(String(name || ''));
+  return m ? (m[3] + '-' + m[1] + '-' + m[2]) : '';
+}
 function batTabName(iso) {
   var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
   return BAT_PREFIX + (m ? (m[2] + '-' + m[3] + '-' + m[1]) : '(no date)');
@@ -1306,6 +1311,8 @@ function writeBatteryTab(ss, snap) {
      blank FORM tab is always there to print */
   for (var old in have) {
     if (wanted[old] || old === BAT_FORM_TAB) continue;
+    var oldIso = batTabIso(old);
+    if (oldIso && archived[oldIso]) { tryOp(function () { ss.deleteSheet(have[old]); }); continue; }
     var keepDate = String(have[old].getRange(1, 5).getValue() || '');
     drawBatteryPage(have[old], [], center, keepDate);
   }
