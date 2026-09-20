@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.15';
+var LOGIC_VER = 'v8.16';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -1187,6 +1187,7 @@ function scanCounts(ss, snap) {
    every battery tab from then on. */
 var BAT_PREFIX = 'BATTERIES ';
 var BAT_FORM_TAB = 'BATTERIES FORM';   /* the blank paper, always present */
+var BAT_CENTER = 'Arlington, Tx';       /* the Center blank on every form */
 var BAT_HDR = ['Battery', 'Serial Number', 'Kart Number', 'Date Used', 'Initials'];
 var BAT_MIN_ROWS = 30;      /* the paper has 30 lines; a bigger pallet just adds rows */
 
@@ -1278,13 +1279,11 @@ function batGroups(snap) {
 function writeBatteryTab(ss, snap) {
   var g = batGroups(snap);
   /* the Center blank is typed once, on any battery tab, and carried to all of them */
-  var center = '', existing = ss.getSheets(), have = {};
+  var center = BAT_CENTER, existing = ss.getSheets(), have = {};
   for (var e = 0; e < existing.length; e++) {
     var nm = existing[e].getName();
     if (nm.indexOf(BAT_PREFIX) !== 0) continue;
     have[nm] = existing[e];
-    if (!center && String(existing[e].getRange(1, 1).getValue() || '').trim() === 'Center:')
-      center = existing[e].getRange(1, 2).getValue();
   }
   /* the single-tab layout from the first cut (9/19) is superseded by the per-date tabs */
   var legacy = ss.getSheetByName('BATTERY TRACKING');

@@ -391,11 +391,10 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.evaluate(() => { const id = batBySn('6180409549'); batAssign(id, '', '', '', ''); DB.bat[id].date = ''; DB.bat[id].ini = ''; save(); });
   await push(A);
 
-  /* Center typed on one tab is copied to all of them and survives */
-  tabs['BATTERIES 09-19-2026']._g[0][1] = 'Arlington';
+  /* Center is always Arlington, Tx */
   await push(A);
-  ok('Center kept on the 9/19 tab', batTab('BATTERIES 09-19-2026')[0][1] === 'Arlington');
-  ok('Center copied to the 9/26 tab', batTab('BATTERIES 09-26-2026')[0][1] === 'Arlington');
+  ok('Center on the 9/19 tab', batTab('BATTERIES 09-19-2026')[0][1] === 'Arlington, Tx');
+  ok('Center on the 9/26 tab', batTab('BATTERIES 09-26-2026')[0][1] === 'Arlington, Tx');
 
   /* ---------- 4. second device ---------- */
   console.log('\n4. device B pulls, edits, and the two merge');
@@ -424,7 +423,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   { const e = batTab('BATTERIES 09-26-2026');
     ok('the emptied 9/26 tab stays as a blank paper with its date', !!e && e[0][4] === '9/26/2026' && e[3][1] === '' && e[32][0] === 30, e && e.slice(0,4)); }
   { const f = batTab('BATTERIES FORM');
-    ok('a blank FORM tab is always present', !!f && f[1][0] === 'Battery Tracking Sheet' && f[0][4] === '' && f[0][1] === 'Arlington' && f[3][1] === '', f && f.slice(0,4)); }
+    ok('a blank FORM tab is always present', !!f && f[1][0] === 'Battery Tracking Sheet' && f[0][4] === '' && f[0][1] === 'Arlington, Tx' && f[3][1] === '', f && f.slice(0,4)); }
   { const tt = batTab('BATTERIES 09-19-2026'); const sns = tt.slice(3).map(r => r[1]).filter(Boolean);
     ok('9/19 tab keeps its batteries, 7777 gone, no gaps', sns.indexOf('6180400002') > -1 && sns.indexOf('6180407777') === -1 && tt[3 + sns.length][1] === '', sns); }
 
