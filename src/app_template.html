@@ -362,8 +362,9 @@
     </div>
     <div id="batBatchList" style="max-height:32vh; overflow:auto; margin-top:6px"></div>
     <p id="batBatchLast" style="color:#9aa3b5; font-size:13px; margin-top:8px; min-height:18px"></p>
-    <div class="mactions">
-      <button class="hbtn red" id="btnBatBatchDone" style="width:100%">DONE</button>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnBatBatchCancel" style="flex:1; margin-right:10px">Cancel</button>
+      <button class="hbtn red" id="btnBatBatchDone" style="flex:1">DONE</button>
     </div>
   </div>
 </div>
@@ -435,7 +436,7 @@
       </span>
     </div>
     <div style="display:flex; margin-top:14px">
-      <button class="hbtn" id="btnBatUseSkip" style="flex:1; margin-right:10px">No serial / skip</button>
+      <button class="hbtn" id="btnBatUseSkip" style="flex:1; margin-right:10px">Cancel</button>
       <button class="hbtn red" id="btnBatUseSave" style="flex:1">SAVE</button>
     </div>
   </div>
@@ -1464,6 +1465,15 @@ $("btnBat").onclick = function(){
   renderBat(); showScreen("scrBat"); window.scrollTo(0,0);
 };
 $("btnBatBatch").onclick = openBatBatch;
+$("btnBatBatchCancel").onclick = function(){
+  var n = batBatch ? batBatch.length : 0;
+  if (n && !confirm("Throw away the " + n + " batter" + (n > 1 ? "ies" : "y") + " scanned in this batch?")) { batFocusScan(); return; }
+  for (var i=0;i<n;i++){ DB.tomb[batBatch[i]] = Date.now(); delete DB.bat[batBatch[i]]; }
+  $("batBatchModal").className = "modal"; batBatch = null;
+  if (n) save();
+  renderBat();
+  if (n) toast("Batch cancelled — " + n + " scan" + (n > 1 ? "s" : "") + " removed");
+};
 $("btnBatBatchDone").onclick = function(){
   var n = batBatch ? batBatch.length : 0;
   $("batBatchModal").className = "modal"; batBatch = null;
@@ -1695,8 +1705,9 @@ $("btnBatOldSave").onclick = function(){
 };
 $("btnBatOldBack").onclick = function(){ $("batOldModal").className = "modal"; if (batUse){ batUse.pending = null; $("batUseModal").className = "modal open"; } };
 $("btnBatUseSkip").onclick = function(){
-  if (!confirm("Skip without a serial? The paper won't show which battery went into kart " + batUse.kart + ".")) return;
+  var k = batUse ? batUse.kart : "";
   $("batUseModal").className = "modal"; batUse = null;
+  toast("Log saved, no battery paired — kart " + k + " can be paired later from the Batteries screen", true);
 };
 
 /* ================= HELPERS ================= */

@@ -202,6 +202,14 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.type('#batScan', '6180403333 ');
   ok('a space suffix works too', await A.page.evaluate(() => batSorted().length) === 5 && await A.page.evaluate(() => $('batScan').value) === '');
   await A.page.evaluate(() => { ['6180401111','6180402222','6180403333'].forEach(sn => { const id = batBySn(sn); DB.tomb[id] = Date.now(); delete DB.bat[id]; }); save(); });
+  /* cancel throws the batch's scans away (dialogs auto-accept) */
+  await A.page.click('#btnBatBatchDone');
+  await A.page.click('#btnBatBatch'); await sleep(100);
+  await A.page.type('#batScan', '6180400777');
+  ok('scan in a throwaway batch', await A.page.evaluate(() => batSorted().length) === 3);
+  await A.page.click('#btnBatBatchCancel');
+  ok('cancel removed that scan and closed the popup', await A.page.evaluate(() => batSorted().length === 2 && $('batBatchModal').className === 'modal'));
+  await A.page.click('#btnBatBatch'); await sleep(100);
   await A.page.click('#btnBatBatchDone');
   ok('DONE closes the popup and the list shows both', await A.page.evaluate(() => $('batBatchModal').className === 'modal' && $('batList').children.length === 2));
   ok('rows say "on the shelf"', /on the shelf/.test(await A.page.textContent('#batList')));
@@ -336,7 +344,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await sleep(100);
   ok('"battery" in the action alone pops it', await A.page.evaluate(() => $('batUseModal').className === 'modal open'));
   await A.page.click('#btnBatUseSkip');
-  ok('skip closes it', await A.page.evaluate(() => $('batUseModal').className === 'modal' && batUse === null));
+  ok('cancel closes it', await A.page.evaluate(() => $('batUseModal').className === 'modal' && batUse === null));
 
   /* ---------- 3. the sheet draws one paper per pallet ---------- */
   console.log('\n3. BATTERIES tabs');
