@@ -342,8 +342,16 @@
 <div class="modal" id="batBatchModal">
   <div class="mcard" style="min-height:auto; border-radius:18px; margin:30px 14px 0;">
     <div class="mtitle">Receive a batch</div>
-    <label class="f">DATE RECEIVED</label>
-    <input type="date" class="in" id="batDefRcv">
+    <div style="display:flex">
+      <span style="flex:1; margin-right:8px">
+        <label class="f">DATE RECEIVED</label>
+        <input type="date" class="in" id="batDefRcv">
+      </span>
+      <span style="flex:1">
+        <label class="f">BATTERY DATE (stamped, e.g. 8-24)</label>
+        <input type="text" class="in" id="batDefBd" placeholder="e.g. 8-24" autocapitalize="off">
+      </span>
+    </div>
     <div style="display:flex; align-items:center; margin-top:12px">
       <input type="text" class="in" id="batScan" placeholder="Scan the barcode..." autocapitalize="off" autocorrect="off" style="flex:1; margin-right:8px; font-size:18px">
       <button class="hbtn" id="btnBatAdd" style="min-height:48px; padding:0 14px">ADD</button>
@@ -360,13 +368,36 @@
   </div>
 </div>
 
+<!-- step 2 of the kart popup: what happens to the batteries coming out -->
+<div class="modal" id="batOldModal">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:40px 14px 0;">
+    <div class="mtitle">Old batteries coming out</div>
+    <p style="color:#9aa3b5; font-size:13px; margin-bottom:8px">For each slot you're filling: is the battery that was in it still good (goes to the used pile) or bad (scrap)?</p>
+    <div id="batOldList"></div>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnBatOldBack" style="flex:1; margin-right:10px">Back</button>
+      <button class="hbtn red" id="btnBatOldSave" style="flex:1">FINISH</button>
+    </div>
+  </div>
+</div>
+
 <!-- battery edit modal -->
 <div class="modal" id="batModal">
   <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
     <div class="mtitle" id="batTitle">Battery</div>
     <p id="batSerial" style="font-size:22px; font-weight:800; letter-spacing:1px; margin-bottom:12px"></p>
-    <label class="f">DATE RECEIVED</label>
-    <input type="date" class="in" id="batRcv">
+    <div style="display:flex">
+      <span style="flex:1; margin-right:8px">
+        <label class="f">DATE RECEIVED</label>
+        <input type="date" class="in" id="batRcv">
+      </span>
+      <span style="flex:1">
+        <label class="f">BATTERY DATE</label>
+        <input type="text" class="in" id="batBd" placeholder="e.g. 8-24" autocapitalize="off">
+      </span>
+    </div>
+    <label class="f" style="margin-top:10px">CONDITION</label>
+    <div class="chiprow" id="batStRow"></div>
     <label class="f" style="margin-top:10px">KART NUMBER</label>
     <input type="number" class="in" id="batKart" inputmode="numeric" placeholder="blank = not in a kart yet">
     <label class="f" style="margin-top:10px">POSITION IN KART</label>
@@ -632,7 +663,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0920-1127";
+var APP_BUILD = "0920-1149";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -995,7 +1026,7 @@ function mergeRemote(r){
           if (!rbe.kart && keep.kart) rbe.kart = keep.kart;
           if (!rbe.ini && keep.ini) rbe.ini = keep.ini;
           DB.tomb[dup] = Date.now(); delete DB.bat[dup];
-          DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || keep.rcv || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: Date.now(), h: (keep.h || []).concat(rbe.h || []) };
+          DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || keep.rcv || "", bd: rbe.bd || keep.bd || "", st: rbe.st || keep.st || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: Date.now(), h: (keep.h || []).concat(rbe.h || []) };
           bySn[rbe.sn] = bid;
         } else {
           if (!keep.kart && rbe.kart){ keep.kart = rbe.kart; keep.at = Date.now(); }
@@ -1004,10 +1035,10 @@ function mergeRemote(r){
         }
         changed = true; continue;
       }
-      DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: rbe.at || 0, h: rbe.h || [] };
+      DB.bat[bid] = { sn: rbe.sn, rcv: rbe.rcv || "", bd: rbe.bd || "", st: rbe.st || "", kart: rbe.kart || "", pos: rbe.pos || "", date: rbe.date || "", ini: rbe.ini || "", c: rbe.c || 0, at: rbe.at || 0, h: rbe.h || [] };
       bySn[rbe.sn] = bid; changed = true;
     } else if ((rbe.at || 0) > (lbe.at || 0)){
-      lbe.sn = rbe.sn; lbe.rcv = rbe.rcv || ""; lbe.kart = rbe.kart || ""; lbe.pos = rbe.pos || ""; lbe.date = rbe.date || ""; lbe.ini = rbe.ini || ""; lbe.at = rbe.at;
+      lbe.sn = rbe.sn; lbe.rcv = rbe.rcv || ""; lbe.bd = rbe.bd || ""; lbe.st = rbe.st || ""; lbe.kart = rbe.kart || ""; lbe.pos = rbe.pos || ""; lbe.date = rbe.date || ""; lbe.ini = rbe.ini || ""; lbe.at = rbe.at;
       changed = true;
     }
     /* history is a union: an event is identified by its timestamp */
@@ -1167,7 +1198,21 @@ function pullFromSheet(){
 }
 
 /* ================= BATTERIES (scan-in) ================= */
-var batModalId = null, batModalPos = "";
+var batModalId = null, batModalPos = "", batModalSt = "";
+var BAT_ST = [["", "NEW"], ["used", "USED (good)"], ["bad", "BAD (scrap)"]];
+function batStLabel(st){ return st === "used" ? "USED" : st === "bad" ? "BAD" : "NEW"; }
+function renderBatStRow(){
+  var row = $("batStRow"); row.innerHTML = "";
+  for (var i=0;i<BAT_ST.length;i++){
+    (function(v, l){
+      var c = document.createElement("button");
+      c.className = "chip" + (batModalSt === v ? " on" : "");
+      c.textContent = l;
+      c.onclick = function(){ batModalSt = v; renderBatStRow(); };
+      row.appendChild(c);
+    })(BAT_ST[i][0], BAT_ST[i][1]);
+  }
+}
 function renderBatPosRow(){
   var row = $("batPosRow"); row.innerHTML = "";
   var k = String($("batKart").value || "").trim();
@@ -1202,7 +1247,7 @@ var BAT_PART = "59191";
    scanned in, stock for 59191 is the count of serials not in a kart */
 function batSyncInv(){
   var any = false, shelf = 0;
-  for (var id in DB.bat){ var b = DB.bat[id]; if (!b || !b.sn) continue; any = true; if (!b.kart) shelf++; }
+  for (var id in DB.bat){ var b = DB.bat[id]; if (!b || !b.sn) continue; any = true; if (!b.kart && b.st !== "bad") shelf++; }
   if (!any) return;
   if (DB.inv[BAT_PART] !== shelf){ DB.inv[BAT_PART] = shelf; DB.invTouched[BAT_PART] = Date.now(); }
 }
@@ -1213,22 +1258,28 @@ function batAtPos(k, pos){
 function batSlots(k){ return +k >= 41 ? 2 : 4; }
 /* put a battery into a kart slot: records the event in its history, and whatever
    was sitting in that slot before comes out (its history says so too) */
-function batAssign(id, kart, pos, date, ini){
+/* a battery comes out of its slot: condition 'used' (good, back on the shelf) or 'bad' (scrap) */
+function batPull(id, cond, date, ini){
+  var b = DB.bat[id]; if (!b) return;
+  var now = Date.now(), from = String(b.kart || "");
+  if (!b.h) b.h = [];
+  b.h.push({ k: "", p: "", d: date || todayISO(), i: ini || "", t: now, out: from, st: cond || "used" });
+  b.kart = ""; b.pos = ""; b.st = cond || "used"; b.at = now;
+}
+function batAssign(id, kart, pos, date, ini, oldCond){
   var b = DB.bat[id]; if (!b) return;
   var now = Date.now();
   if (kart && pos){
     for (var o in DB.bat){
       var ob = DB.bat[o];
-      if (o !== id && ob && String(ob.kart) === String(kart) && +ob.pos === +pos){
-        if (!ob.h) ob.h = [];
-        ob.h.push({ k: "", p: "", d: date, i: ini, t: now, out: String(kart) });
-        ob.kart = ""; ob.pos = ""; ob.at = now;
-      }
+      if (o !== id && ob && String(ob.kart) === String(kart) && +ob.pos === +pos) batPull(o, oldCond || "used", date, ini);
     }
+    /* the slot's date chip on the kart page is this battery's stamped date */
+    if (b.bd && DB.karts[kart]){ DB.karts[kart].status["bat" + pos] = b.bd; DB.stamps.karts[kart] = now; }
   }
   b.kart = String(kart || ""); b.pos = pos ? String(pos) : ""; b.date = date || ""; b.ini = ini || ""; b.at = now;
   if (!b.h) b.h = [];
-  b.h.push({ k: b.kart, p: b.pos, d: b.date, i: b.ini, t: now });
+  b.h.push({ k: b.kart, p: b.pos, d: b.date, i: b.ini, t: now, st: b.st || "" });
 }
 function batClean(v){
   /* scanners sometimes prefix/suffix junk; keep letters+digits only */
@@ -1254,6 +1305,7 @@ function batFocusScan(){ setTimeout(function(){ try { if (batBatch) $("batScan")
 function openBatBatch(){
   batBatch = [];
   if (!$("batDefRcv").value) $("batDefRcv").value = todayISO();
+  if (!$("batDefBd").value && DB.meta.batBd) $("batDefBd").value = DB.meta.batBd;
   $("batScan").value = ""; $("batBatchLast").textContent = "";
   renderBatBatch();
   $("batBatchModal").className = "modal open";
@@ -1266,7 +1318,7 @@ function renderBatBatch(){
     var b = DB.bat[batBatch[i]]; if (!b) continue;
     var d = document.createElement("div");
     d.className = "partitem";
-    d.innerHTML = '<span class="pn">#' + batNumber(batBatch[i]) + '</span><span class="pd" style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>' +
+    d.innerHTML = '<span class="pn">#' + batNumber(batBatch[i]) + '</span><span class="pd" style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + (b.bd ? ' <small style="color:#9aa3b5; font-weight:600">' + esc(b.bd) + '</small>' : '') + '</span>' +
       '<button class="delx" style="font-size:22px; color:#ff8a80; padding:4px 12px">&times;</button>';
     (function(id){
       d.querySelector(".delx").onclick = function(ev){
@@ -1295,16 +1347,18 @@ function batAddFromScan(){
     batFocusScan(); return;
   }
   var rcv = $("batDefRcv").value || todayISO();
-  var id = batCreate(sn, rcv);
+  var bd = String($("batDefBd").value || "").trim();
+  DB.meta.batBd = bd;
+  var id = batCreate(sn, rcv, bd);
   batBatch.push(id);
   save(); renderBatBatch();
   $("batBatchLast").textContent = "Added " + sn + " to " + isoToUS(rcv);
   batFocusScan();
 }
-function batCreate(sn, rcv){
+function batCreate(sn, rcv, bd){
   var now = Date.now();
   var id = "b" + now.toString(36) + Math.floor(Math.random()*1e6).toString(36);
-  DB.bat[id] = { sn: sn, rcv: rcv || todayISO(), kart: "", date: "", ini: "", c: now, at: now };
+  DB.bat[id] = { sn: sn, rcv: rcv || todayISO(), bd: bd || "", st: "", kart: "", date: "", ini: "", c: now, at: now, h: [] };
   return id;
 }
 function batNumber(id){
@@ -1343,7 +1397,18 @@ function renderBatForms(){
         ev.stopPropagation();
         window.open(DB.meta.syncUrl + (DB.meta.syncUrl.indexOf("?")>-1?"&":"?") + "mode=formpdf&date=" + rcv, "_blank");
       };
-      div.onclick = function(){ $("batSearch").value = isoToUS(rcv); renderBat(); };
+      div.onclick = function(){
+        var v = prompt("This batch: " + g.n + " batteries received " + isoToUS(rcv) + ".\n\nTo change the received date for ALL of them, type the new date (M/D/YYYY). Leave blank to just filter the list.", "");
+        if (v === null) return;
+        v = v.trim();
+        if (!v){ $("batSearch").value = isoToUS(rcv); renderBat(); return; }
+        var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v);
+        if (!m){ toast("Type it like 9/16/2026", true); return; }
+        var iso = m[3] + "-" + (m[1].length<2?"0":"") + m[1] + "-" + (m[2].length<2?"0":"") + m[2];
+        var n = 0;
+        for (var id in DB.bat){ var b = DB.bat[id]; if (b && (b.rcv||"") === rcv){ b.rcv = iso; b.at = Date.now(); n++; } }
+        save(); renderBat(); toast(n + " batteries moved to " + isoToUS(iso));
+      };
       el.appendChild(div);
     })(keys[k], groups[keys[k]]);
   }
@@ -1366,8 +1431,10 @@ function renderBat(){
       if (!b.kart) div.style.borderColor = "#8a6d1d";
       div.innerHTML = '<span class="pn">#'+batNumber(id)+'</span><span class="pd">' +
         '<span style="font-size:17px; font-weight:800; color:#fff; letter-spacing:1px">'+esc(b.sn)+'</span><br>' +
-        'Rcvd ' + esc(isoToUS(b.rcv) || "?") + ' &middot; ' +
+        'Rcvd ' + esc(isoToUS(b.rcv) || "?") + (b.bd ? ' &middot; ' + esc(b.bd) : '') + ' &middot; ' +
         (b.kart ? 'Kart <b style="color:#fff">'+esc(String(b.kart))+'</b>' + (b.pos ? ' BAT ' + esc(String(b.pos)) : '') + ' &middot; ' + esc(isoToUS(b.date) || "no date") + ' &middot; ' + (b.ini ? esc(b.ini) : '<span style="color:#ffc857">no initials</span>')
+                : b.st === "bad" ? '<span style="color:#ff8a80; font-weight:700">BAD — scrap pile</span>'
+                : b.st === "used" ? '<span style="color:#ffc857; font-weight:700">on the shelf (USED)</span>'
                 : '<span style="color:#ffc857; font-weight:700">on the shelf</span>') +
         '</span>';
       div.onclick = function(){ openBatModal(id); };
@@ -1382,6 +1449,9 @@ function openBatModal(id){
   $("batTitle").textContent = "Battery #" + batNumber(id);
   $("batSerial").textContent = b.sn;
   $("batRcv").value = b.rcv || "";
+  $("batBd").value = b.bd || "";
+  batModalSt = b.st || "";
+  renderBatStRow();
   $("batKart").value = b.kart || "";
   batModalPos = b.pos || "";
   renderBatPosRow();
@@ -1420,6 +1490,8 @@ $("btnBatSave").onclick = function(){
     if (!confirm("Kart " + kart + " isn't on the grid. Save it anyway?")) return;
   }
   b.rcv = $("batRcv").value || b.rcv || "";
+  b.bd = String($("batBd").value || "").trim();
+  if ((b.st || "") !== batModalSt){ b.st = batModalSt; b.at = Date.now(); if (batModalSt === "bad" && kart){ kart = ""; batModalPos = ""; } }
   var nIni = String($("batIni").value || "").trim().toUpperCase();
   var nDate = $("batDate").value || "";
   if (kart !== String(b.kart||"") || String(batModalPos) !== String(b.pos||"")) batAssign(batModalId, kart, batModalPos, nDate, nIni);
@@ -1470,6 +1542,7 @@ function renderBatUse(){
     for (var i=list.length-1; i>=0; i--){
       var id = list[i].id, b = list[i].b, on = !!batUse.sel[id];
       if (b.kart && b.kart !== batUse.kart) continue;
+      if (b.st === "bad") continue;
       if (q && !on && b.sn.indexOf(q) === -1) continue;
       n++;
       (function(id, b, on){
@@ -1478,6 +1551,8 @@ function renderBatUse(){
         div.style.borderColor = on ? "#1d7a3e" : (b.kart ? "#7a2a2a" : "#384060");
         div.innerHTML = '<span class="pn">' + (on ? "&#10003;" : "&nbsp;&nbsp;") + '</span><span class="pd">' +
           '<span style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(b.sn) + '</span>' +
+          (b.st === "used" ? ' <span style="background:#8a6d1d; color:#fff; border-radius:6px; padding:1px 6px; font-size:11px; font-weight:800">USED</span>' : '') +
+          (b.bd ? ' &middot; ' + esc(b.bd) : '') +
           ' &middot; rcvd ' + esc(isoToUS(b.rcv) || "?") +
           (b.kart === batUse.kart ? ' &middot; <span style="color:#4caf7a">already this kart</span>' : '') + '</span>';
         div.onclick = function(){ if (batUse.sel[id]){ delete batUse.sel[id]; delete batUse.pos[id]; } else { batUse.sel[id] = 1; $("batUseScan").value = ""; } renderBatUse(); };
@@ -1521,6 +1596,9 @@ function batUseScanAdd(){
   } else if (DB.bat[id].kart && DB.bat[id].kart !== batUse.kart){
     toast(sn + " is in kart " + DB.bat[id].kart + " — take it out of that kart first (Batteries screen)", true);
     inp.focus(); return;
+  } else if (DB.bat[id].st === "bad"){
+    if (!confirm(sn + " is in the BAD pile. Put it in kart " + batUse.kart + " anyway?")){ inp.focus(); return; }
+    DB.bat[id].st = "used"; DB.bat[id].at = Date.now();
   }
   batUse.sel[id] = 1;
   renderBatUse(); inp.focus();
@@ -1542,14 +1620,80 @@ $("btnBatUseSave").onclick = function(){
   var missing = 0;
   for (var m=0;m<ids.length;m++) if (!batUse.pos[ids[m]]) missing++;
   if (missing && !confirm(missing + " battery" + (missing>1?"ies have":" has") + " no position (BAT 1-" + batSlots(batUse.kart) + ").\nSave anyway?")) return;
-  for (var i=0;i<ids.length;i++) batAssign(ids[i], batUse.kart, batUse.pos[ids[i]] || "", date, ini);
+  /* step 2: what happens to whatever is coming out of those slots? */
+  var olds = [];
+  for (var oi=0;oi<ids.length;oi++){
+    var pos = batUse.pos[ids[oi]]; if (!pos) continue;
+    var oldSn = batAtPos(batUse.kart, pos), oldId = oldSn ? batBySn(oldSn) : null;
+    if (oldId && ids.indexOf(oldId) > -1) continue;            /* same battery going back in */
+    var hadOne = oldId || !!(DB.karts[batUse.kart] && DB.karts[batUse.kart].status["bat" + pos]);
+    if (hadOne) olds.push({ pos: pos, id: oldId, sn: oldSn, cond: "used", newSn: "" });
+  }
+  if (olds.length){
+    batUse.pending = { ids: ids, date: date, ini: ini, olds: olds };
+    openBatOld(); return;
+  }
+  batUseFinish(ids, date, ini, {});
+};
+function batUseFinish(ids, date, ini, condByPos){
+  for (var i=0;i<ids.length;i++) batAssign(ids[i], batUse.kart, batUse.pos[ids[i]] || "", date, ini, condByPos[batUse.pos[ids[i]]]);
   DB.meta.batIni = ini;
   save();
   var kk = batUse.kart;
-  $("batUseModal").className = "modal"; batUse = null;
+  $("batUseModal").className = "modal"; $("batOldModal").className = "modal"; batUse = null;
   if ($("scrKart").className.indexOf("active") > -1) renderKart();
   toast(ids.length + (ids.length > 1 ? " batteries" : " battery") + " → kart " + kk);
+}
+function openBatOld(){
+  renderBatOld();
+  $("batUseModal").className = "modal";
+  $("batOldModal").className = "modal open";
+}
+function renderBatOld(){
+  var el = $("batOldList"); el.innerHTML = "";
+  var olds = batUse.pending.olds;
+  for (var i=0;i<olds.length;i++){
+    (function(o){
+      var div = document.createElement("div");
+      div.className = "partitem"; div.style.display = "block";
+      var head = '<div><b style="color:#6fa3e8">BAT ' + esc(o.pos) + '</b> &mdash; ' +
+        (o.sn ? '<span style="font-size:16px; font-weight:800; color:#fff; letter-spacing:1px">' + esc(o.sn) + '</span>'
+              : '<span style="color:#ffc857">old battery was never scanned in</span>') + '</div>';
+      var scan = o.sn ? '' : '<input type="text" class="in" placeholder="Scan its serial to track it (optional)" autocapitalize="off" style="margin-top:8px; font-size:16px" value="' + esc(o.newSn) + '">';
+      div.innerHTML = head + scan + '<div class="chiprow" style="margin-top:8px"></div>';
+      var row = div.querySelector(".chiprow");
+      [["used", "GOOD — used pile"], ["bad", "BAD — scrap"]].forEach(function(opt){
+        var c = document.createElement("button");
+        c.className = "chip" + (o.cond === opt[0] ? " on" : "");
+        c.textContent = opt[1];
+        c.onclick = function(){ o.cond = opt[0]; renderBatOld(); };
+        row.appendChild(c);
+      });
+      var inp = div.querySelector("input");
+      if (inp){
+        inp.addEventListener("input", function(){ o.newSn = batClean(inp.value); });
+        inp.addEventListener("keydown", function(ev){ var k = ev.keyCode || ev.which; if (k === 13 || k === 9 || k === 32) ev.preventDefault(); });
+      }
+      el.appendChild(div);
+    })(olds[i]);
+  }
+}
+$("btnBatOldSave").onclick = function(){
+  if (!batUse || !batUse.pending) return;
+  var p = batUse.pending, condByPos = {};
+  for (var i=0;i<p.olds.length;i++){
+    var o = p.olds[i];
+    condByPos[o.pos] = o.cond;
+    if (!o.id && o.newSn && o.newSn.length >= 6){
+      /* an old battery from before the system: bring it in so its fate is on record */
+      var nid = batBySn(o.newSn) || batCreate(o.newSn, todayISO(), (DB.karts[batUse.kart] && DB.karts[batUse.kart].status["bat" + o.pos]) || "");
+      var nb = DB.bat[nid];
+      nb.kart = batUse.kart; nb.pos = o.pos;     /* it was in this slot; batAssign will pull it */
+    }
+  }
+  batUseFinish(p.ids, p.date, p.ini, condByPos);
 };
+$("btnBatOldBack").onclick = function(){ $("batOldModal").className = "modal"; if (batUse){ batUse.pending = null; $("batUseModal").className = "modal open"; } };
 $("btnBatUseSkip").onclick = function(){
   if (!confirm("Skip without a serial? The paper won't show which battery went into kart " + batUse.kart + ".")) return;
   $("batUseModal").className = "modal"; batUse = null;

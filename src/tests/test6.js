@@ -176,10 +176,11 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await sleep(150);
   ok('batch popup open, scan box focused, date defaults to today', await A.page.evaluate(() => $('batBatchModal').className === 'modal open' && document.activeElement === $('batScan') && $('batDefRcv').value === todayISO()));
   await A.page.fill('#batDefRcv', '2026-09-19');
+  await A.page.fill('#batDefBd', '8-24');
   await A.page.type('#batScan', '6180409549');
   await A.page.keyboard.press('Enter');
   let s = await A.page.evaluate(() => { const l = batSorted(); return { n: l.length, b: l[0] && l[0].b, box: $('batScan').value, cnt: $('batBatchCount').textContent, focused: document.activeElement === $('batScan') }; });
-  ok('one battery on the 9/19 pallet, nothing filled in yet', s.n === 1 && s.b.sn === '6180409549' && s.b.rcv === '2026-09-19' && s.b.kart === '' && s.b.date === '' && s.b.ini === '', s);
+  ok('one battery on the 9/19 pallet with its date code, nothing filled in yet', s.n === 1 && s.b.sn === '6180409549' && s.b.rcv === '2026-09-19' && s.b.bd === '8-24' && s.b.kart === '' && s.b.date === '' && s.b.ini === '', s);
   ok('box cleared, count 1, still focused for the next scan', s.box === '' && s.cnt === '1' && s.focused, s);
   await A.page.type('#batScan', '6180409549');
   await A.page.keyboard.press('Enter');
@@ -241,10 +242,14 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.evaluate(() => { const c = $('batUseList').querySelectorAll('.chip'); c[1].click(); });
   ok('BAT 2 chip lit', await A.page.evaluate(() => batUse.pos[Object.keys(batUse.sel)[0]] === '2'));
   await A.page.click('#btnBatUseSave');
+  await sleep(100);
+  ok('kart 12 had a date on BAT 2, so step 2 asks about that untracked old battery', await A.page.evaluate(() => $('batOldModal').className === 'modal open' && batUse.pending.olds.length === 1 && !batUse.pending.olds[0].sn));
+  await A.page.click('#btnBatOldSave');   /* GOOD, no serial known */
   s = await A.page.evaluate(() => batSorted()[0].b);
   ok('battery now shows kart 12 BAT 2 / 9/20/2026 / RB', s.kart === '12' && s.pos === '2' && s.date === '2026-09-20' && s.ini === 'RB', s);
   ok('history has the install', s.h.length === 1 && s.h[0].k === '12' && s.h[0].p === '2', s.h);
   ok('kart page BAT 2 chip shows the serial', await A.page.evaluate(() => $('batRow').children[1].textContent.indexOf('6180409549') > -1 && $('batRow').children[0].textContent.indexOf('6180409549') === -1));
+  ok('kart 12 BAT 2 date chip filled from the battery date code', await A.page.evaluate(() => DB.karts['12'].status.bat2) === '8-24');
   ok('popup closed', await A.page.evaluate(() => $('batUseModal').className === 'modal'));
   ok('kart 12 page lists the serial', (await A.page.textContent('#batSerials')).indexOf('6180409549') > -1);
 
@@ -279,10 +284,21 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('positions chosen', await A.page.evaluate(() => batUse.pos[batBySn('6180405554')] === '2' && batUse.pos[batBySn('6180400001')] === '1'));
   await A.page.fill('#batUseIni', 'JS');
   await A.page.click('#btnBatUseSave');
+  await sleep(100);
+  ok('step 2 asks about the old batteries', await A.page.evaluate(() => $('batOldModal').className === 'modal open' && $('batOldList').children.length === 2));
+  s = await A.page.evaluate(() => batUse.pending.olds.map(o => ({ pos: o.pos, sn: o.sn })));
+  ok('BAT 2 lists 9549, BAT 1 had an untracked battery', s.some(o => o.pos === '2' && o.sn === '6180409549') && s.some(o => o.pos === '1' && !o.sn), s);
+  /* 9549 is BAD; the untracked BAT 1 battery gets its serial scanned and stays GOOD */
+  await A.page.evaluate(() => { const rows = Array.from($('batOldList').children); rows.forEach(r => { if (r.textContent.indexOf('6180409549') > -1) r.querySelectorAll('.chip')[1].click(); }); });
+  await A.page.evaluate(() => { const rows = Array.from($('batOldList').children); rows.forEach(r => { const i = r.querySelector('input'); if (i) { i.value = '6180408888'; i.dispatchEvent(new Event('input')); } }); });
+  await A.page.click('#btnBatOldSave');
   s = await A.page.evaluate(() => [batBySn('6180405554'), batBySn('6180400001')].map(id => DB.bat[id]));
   ok('both paired to kart 12 with JS / 9/21', s.every(b => b.kart === '12' && b.ini === 'JS' && b.date === '2026-09-21') && s[0].pos === '2' && s[1].pos === '1', s);
   s = await A.page.evaluate(() => DB.bat[batBySn('6180409549')]);
-  ok('the old BAT 2 came out and its history says so', s.kart === '' && s.pos === '' && s.h.length === 2 && s.h[1].out === '12', s);
+  ok('the old BAT 2 came out as BAD and its history says so', s.kart === '' && s.pos === '' && s.st === 'bad' && s.h.length === 2 && s.h[1].out === '12' && s.h[1].st === 'bad', s);
+  s = await A.page.evaluate(() => DB.bat[batBySn('6180408888')]);
+  ok('the untracked old BAT 1 battery is now on record as USED, with the kart\'s old date code', s && s.st === 'used' && s.kart === '' && s.bd === '8-24' && s.h.length === 1 && s.h[0].out === '12', s);
+  ok('bad battery does not count as inventory', await A.page.evaluate(() => DB.inv['59191']) === await A.page.evaluate(() => Object.keys(DB.bat).filter(k => !DB.bat[k].kart && DB.bat[k].st !== 'bad').length));
   ok('kart page: BAT 1 = 0001, BAT 2 = 5554', await A.page.evaluate(() => $('batRow').children[0].textContent.indexOf('6180400001') > -1 && $('batRow').children[1].textContent.indexOf('6180405554') > -1));
 
   /* batteries already in a kart are not offered to another kart; stock = shelf count */
@@ -294,12 +310,12 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.click('#btnSaveLog');
   await sleep(150);
   s = await A.page.evaluate(() => Array.from($('batUseList').children).map(r => r.textContent));
-  ok('kart 7 popup offers only shelf batteries (9549 + 7777), not the two in kart 12', s.length === 2 && s.join(' ').indexOf('6180405554') === -1 && s.join(' ').indexOf('6180400001') === -1, s);
+  ok('kart 7 popup offers shelf batteries (7777 + used 8888), not the bad one nor the two in kart 12', s.length === 2 && s.join(' ').indexOf('6180405554') === -1 && s.join(' ').indexOf('6180400001') === -1 && s.join(' ').indexOf('6180409549') === -1 && s.join(' ').indexOf('USED') > -1, s);
   await A.page.type('#batUseScan', '6180405554');
   await A.page.keyboard.press('Enter');
   ok('scanning a serial that is in kart 12 is refused', await A.page.evaluate(() => Object.keys(batUse.sel).length === 0) && (await toast(A)).indexOf('is in kart 12') > -1, await toast(A));
   await A.page.click('#btnBatUseSkip');
-  ok('59191 stock equals the shelf count (2)', await A.page.evaluate(() => DB.inv['59191']) === 2, await A.page.evaluate(() => DB.inv['59191']));
+  ok('59191 stock equals the shelf count (2: new 7777 + used 8888)', await A.page.evaluate(() => DB.inv['59191']) === 2, await A.page.evaluate(() => DB.inv['59191']));
   await A.page.evaluate(() => openKart('12'));
 
   /* a log with no battery does not pop */
@@ -333,12 +349,12 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('row 2 is the title', t[1][0] === 'Battery Tracking Sheet');
   ok('row 3 headers match the paper', JSON.stringify(t[2]) === JSON.stringify(['Battery', 'Serial Number', 'Kart Number', 'Date Used', 'Initials']));
   ok('battery 1 (pulled again) shows blank kart but keeps its serial', t[3][0] === 1 && t[3][1] === '6180409549' && t[3][2] === '' , t[3]);
-  { const lg = tabs['BATTERY LOG']._g.map(r => r.slice(0, 9));
-    ok('BATTERY LOG has the header', lg[0][1] === 'SERIAL' && lg[0][5] === 'POSITION');
-    const ev = lg.slice(1).filter(r => r[1] === '6180409549').map(r => r[3]);
+  { const lg = tabs['BATTERY LOG']._g.map(r => r.slice(0, 10));
+    ok('BATTERY LOG has the header', lg[0][1] === 'SERIAL' && lg[0][6] === 'POSITION' && lg[0][3] === 'BATTERY DATE');
+    const ev = lg.slice(1).filter(r => r[1] === '6180409549').map(r => r[4]);
     ok('9549 log: received, installed, pulled (newest first)', ev[0].indexOf('pulled from kart 12') === 0 && ev[1] === 'installed' && ev[2] === 'received', ev);
-    const inst = lg.slice(1).find(r => r[1] === '6180405554' && r[3] === 'installed');
-    ok('5554 install row carries kart 12 BAT 2 JS', inst && inst[4] === '12' && inst[5] === '2' && inst[7] === 'JS' && inst[8] === 'kart 12 BAT 2', inst); }
+    const inst = lg.slice(1).find(r => r[1] === '6180405554' && r[4] === 'installed');
+    ok('5554 install row carries kart 12 BAT 2 JS', inst && inst[5] === '12' && inst[6] === '2' && inst[8] === 'JS' && inst[9] === 'kart 12 BAT 2' && inst[3] === '8-24', inst); }
   ok('battery 2', t[4][0] === 2 && t[4][1] === '6180405554' && t[4][2] === '12' && t[4][3] === '9/21/2026' && t[4][4] === 'JS', t[4]);
   ok('30 numbered rows like the paper', t[32][0] === 30 && t[32][1] === '' && t.length >= 33, t.length);
   let t2 = batTab('BATTERIES 09-26-2026');
@@ -380,7 +396,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   console.log('\n4. device B pulls, edits, and the two merge');
   await pull(B);
   s = await B.page.evaluate(() => batSorted().map(x => x.b.sn));
-  ok('B sees all four', s.length === 4, s);
+  ok('B sees all five', s.length === 5, s);
   await B.page.evaluate(() => { const id = batBySn('6180409549'); DB.bat[id].kart = '7'; DB.bat[id].at = Date.now() + 5; save(); });
   await push(B);
   await pull(A);
@@ -412,7 +428,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   const C = await device(browser, 'C');
   await C.page.evaluate(() => { DB.bat = {}; saveQuiet(); });
   await pull(C);
-  ok('restored device has the batteries', await C.page.evaluate(() => batSorted().length) === 4);
+  ok('restored device has the batteries', await C.page.evaluate(() => batSorted().length) === 5);
 
   /* ---------- 6. more than 30 on one pallet just adds rows ---------- */
   console.log('\n6. beyond the paper\'s 30 lines');

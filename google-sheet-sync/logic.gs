@@ -7,7 +7,7 @@
  *  kart tabs 1-53, appends to "parts used", hidden _APP DATA.
  *  Never touches inventory tabs' content or the template. */
 
-var LOGIC_VER = 'v8.13';
+var LOGIC_VER = 'v8.14';
 
 var COUNT_TAB = 'APP COUNT SHEET';
 
@@ -1361,25 +1361,27 @@ function drawBatteryPage(sh, list, center, received) {
    Newest first. Batteries that were only received show one "on shelf" row so
    the tab lists every serial the shop has ever scanned. */
 var BAT_LOG_TAB = 'BATTERY LOG';
-var BAT_LOG_HDR = ['WHEN', 'SERIAL', 'RECEIVED', 'EVENT', 'KART', 'POSITION', 'DATE USED', 'INITIALS', 'NOW IN'];
+var BAT_LOG_HDR = ['WHEN', 'SERIAL', 'RECEIVED', 'BATTERY DATE', 'EVENT', 'KART', 'POSITION', 'DATE USED', 'INITIALS', 'NOW IN'];
 function writeBatteryLog(ss, snap) {
   var bat = (snap && snap.bat) || {}, tomb = (snap && snap.tomb) || {}, rows = [];
   for (var id in bat) {
     var b = bat[id];
     if (!b || tomb[id] || !b.sn) continue;
-    var nowIn = b.kart ? ('kart ' + b.kart + (b.pos ? ' BAT ' + b.pos : '')) : 'shelf';
+    var nowIn = b.kart ? ('kart ' + b.kart + (b.pos ? ' BAT ' + b.pos : ''))
+              : b.st === 'bad' ? 'BAD pile' : b.st === 'used' ? 'shelf (used)' : 'shelf (new)';
+    var bd = String(b.bd || '');
     var h = b.h || [];
     if (!h.length) {
-      rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), b.kart ? 'in kart (no history)' : 'received',
+      rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), bd, b.kart ? 'in kart (no history)' : 'received',
                  b.kart || '', b.pos || '', batUS(b.date), b.ini || '', nowIn]);
       continue;
     }
-    rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), 'received', '', '', '', '', nowIn]);
+    rows.push([+b.c || 0, String(b.sn), batUS(b.rcv), bd, 'received', '', '', '', '', nowIn]);
     for (var i = 0; i < h.length; i++) {
       var e = h[i];
-      rows.push([+e.t || 0, String(b.sn), batUS(b.rcv),
-                 e.out ? ('pulled from kart ' + e.out + ' (replaced)') : ('installed'),
-                 e.k || '', e.p || '', batUS(e.d), e.i || '', nowIn]);
+      var ev = e.out ? ('pulled from kart ' + e.out + (e.st === 'bad' ? ' — BAD, scrapped' : ' — still good, used pile'))
+                     : ('installed' + (e.st === 'used' ? ' (used battery)' : ''));
+      rows.push([+e.t || 0, String(b.sn), batUS(b.rcv), bd, ev, e.k || '', e.p || '', batUS(e.d), e.i || '', nowIn]);
     }
   }
   rows.sort(function (a, b) { return b[0] - a[0] || (a[1] < b[1] ? -1 : 1); });
@@ -1397,7 +1399,7 @@ function writeBatteryLog(ss, snap) {
   tryOp(function () {
     sh.getRange(1, 1, 1, BAT_LOG_HDR.length).setFontWeight('bold');
     sh.setFrozenRows(1);
-    sh.setColumnWidth(1, 130); sh.setColumnWidth(2, 120); sh.setColumnWidth(4, 220); sh.setColumnWidth(9, 130);
+    sh.setColumnWidth(1, 130); sh.setColumnWidth(2, 120); sh.setColumnWidth(5, 260); sh.setColumnWidth(10, 130);
   });
   SpreadsheetApp.flush();
   return rows.length;
