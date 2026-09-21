@@ -300,6 +300,29 @@
   </div>
 </div>
 
+<!-- parts scanned before the badge: claim them or let them go -->
+<div class="modal" id="claimModal" style="z-index:60">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle" id="claimTitle">Scanned before your badge</div>
+    <p style="color:#9aa3b5; font-size:13px; margin-bottom:8px">These were scanned with nobody signed in. Tick the ones you took.</p>
+    <div id="claimList"></div>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnClaimNo" style="flex:1; margin-right:10px">Not mine</button>
+      <button class="hbtn red" id="btnClaimYes" style="flex:2">THOSE ARE MINE</button>
+    </div>
+  </div>
+</div>
+<div class="modal" id="orphanModal" style="z-index:60">
+  <div class="mcard" style="min-height:auto; border-radius:18px; margin:60px 14px 0;">
+    <div class="mtitle">Scans with no badge</div>
+    <p style="color:#9aa3b5; font-size:13px; margin-bottom:8px">Parts scanned off the shelf that nobody claimed. Stock was taken; the part isn't on anyone's name.</p>
+    <div id="orphanList" style="max-height:50vh; overflow:auto"></div>
+    <div style="display:flex; margin-top:14px">
+      <button class="hbtn" id="btnOrphanClose" style="flex:1">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- scan-count mode: scan a label, it counts; keep scanning or type the number; Enter / next scan submits -->
 <div class="modal" id="scanCountModal">
   <div class="mcard" style="min-height:auto; border-radius:18px; margin:24px 14px 0;">
@@ -735,7 +758,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0921-1502";
+var APP_BUILD = "0921-1508";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -2356,6 +2379,7 @@ function scanCommand(code){
     if (DB.mechanics.indexOf(name) === -1) DB.mechanics.push(name);
     DB.meta.scanMech = name; pullTouch(); save(); renderPullBar();
     toast("Scanning as " + name + " \u2014 " + Math.round(PULL_WINDOW/1000) + "s per scan");
+    if (pendParts()) openClaim(name);
     return;
   }
   toast("Unknown command " + code, true);
@@ -2371,7 +2395,8 @@ var lastPull = null;   /* { num, mech } for UNDO */
 var PULL_WINDOW = 60000, pullTick = null;
 function pullTouch(){ DB.meta.scanUntil = Date.now() + PULL_WINDOW; }
 function pullExpireCheck(){
-  if (!DB.meta.scanMech) return;
+  if (pendParts() && Date.now() >= (DB.meta.pendUntil || 0)) pendOrphan();
+  if (!DB.meta.scanMech){ renderPullBar(); return; }
   if (Date.now() >= (DB.meta.scanUntil || 0)){
     var who = DB.meta.scanMech;
     DB.meta.scanMech = ""; DB.meta.scanUntil = 0; lastPull = null; save(); renderPullBar();
@@ -2401,7 +2426,7 @@ function partsAdd(str, num, delta){
 }
 function pullPart(num){
   var mech = DB.meta.scanMech || "";
-  if (!mech){ toast("Scan your badge first, then the part", true); return; }
+  if (!mech){ pendAdd(num); return; }
   pullTouch();
   var e = pullEntryFor(mech, isoToUS(todayISO()), true);
   e.parts = partsAdd(e.parts, num, 1);
@@ -2413,6 +2438,11 @@ function pullPart(num){
 }
 function pullUndo(){
   if (!lastPull){ toast("Nothing to undo", true); return; }
+  if (lastPull.pend){
+    DB.meta.pendParts = partsAdd(pendParts(), lastPull.num, -1);
+    if (DB.inv[lastPull.num] !== undefined){ DB.inv[lastPull.num] += 1; DB.invTouched[lastPull.num] = Date.now(); }
+    toast("Undid " + lastPull.num); lastPull = null; save(); renderPullBar(); return;
+  }
   var e = pullEntryFor(lastPull.mech, isoToUS(todayISO()), false);
   if (e){
     e.parts = partsAdd(e.parts, lastPull.num, -1);
@@ -2447,20 +2477,107 @@ function reconcilePulls(partsStr, mech){
   }
   return remaining.join(", ");   /* what still has to come out of stock */
 }
+/* Parts scanned with nobody signed in: stock comes off right away (the part
+   left the shelf either way) and they wait PULL_WINDOW for a badge. A badge
+   in time gets a "these yours?" popup; no badge and they're logged as
+   no-badge scans so the boss can see how often it happens. */
+var PULL_ORPHAN_TAG = "PULLED (no badge)";
+function pendParts(){ return DB.meta.pendParts || ""; }
+function pendAdd(num){
+  DB.meta.pendParts = partsAdd(pendParts(), num, 1);
+  DB.meta.pendUntil = Date.now() + PULL_WINDOW;
+  if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - 1); DB.invTouched[num] = Date.now(); }
+  lastPull = { num: num, mech: "", pend: true };
+  save(); renderPullBar();
+  toast("No badge \u2014 holding " + num + ". Scan your badge to claim it.", true);
+}
+function pendOrphan(){
+  var parts = pendParts(); if (!parts) return;
+  var dateUS = isoToUS(todayISO()), e = null;
+  for (var i=DB.shop.length-1;i>=0;i--){ var x = DB.shop[i]; if (x.usedFor === PULL_ORPHAN_TAG && x.date === dateUS){ e = x; break; } }
+  if (!e){ e = { id: newEntryId(), date: dateUS, usedFor: PULL_ORPHAN_TAG, parts: "", mechanic: "" }; DB.shop.push(e); }
+  var its = parsePartsString(parts);
+  for (var k=0;k<its.length;k++) e.parts = partsAdd(e.parts, its[k].num, its[k].qty);
+  if (!DB.meta.orphanLog) DB.meta.orphanLog = [];
+  DB.meta.orphanLog.push({ t: Date.now(), parts: parts });
+  if (DB.meta.orphanLog.length > 500) DB.meta.orphanLog.splice(0, DB.meta.orphanLog.length - 500);
+  DB.meta.pendParts = ""; DB.meta.pendUntil = 0;
+  if (lastPull && lastPull.pend) lastPull = null;
+  save(); renderPullBar();
+  toast("Nobody claimed " + parts + " \u2014 logged as a no-badge scan", true);
+}
+function orphanCount(days){
+  var log = DB.meta.orphanLog || [], cut = Date.now() - days*86400000, n = 0;
+  for (var i=0;i<log.length;i++) if (log[i].t >= cut) n++;
+  return n;
+}
+var claimOffer = null;
+function openClaim(mech){
+  var its = parsePartsString(pendParts()); if (!its.length) return;
+  claimOffer = { mech: mech, rows: its.map(function(it){ return { num: it.num, qty: it.qty, on: true }; }) };
+  var el = $("claimList"); el.innerHTML = "";
+  claimOffer.rows.forEach(function(r){
+    var p = partRow(r.num);
+    var d = document.createElement("div");
+    d.className = "partitem"; d.style.borderColor = "#1d7a3e";
+    d.innerHTML = '<span class="pn">&#10003;</span><span class="pd"><b style="color:#fff">' + esc(r.num) + '</b> ' + esc(p ? pname(p) : "") + '</span><span class="qbadge q-green">&times;' + r.qty + '</span>';
+    d.onclick = function(){ r.on = !r.on; d.style.borderColor = r.on ? "#1d7a3e" : "#384060"; d.querySelector(".pn").innerHTML = r.on ? "&#10003;" : "&nbsp;&nbsp;"; };
+    el.appendChild(d);
+  });
+  $("claimTitle").textContent = mech + " \u2014 scanned before your badge";
+  $("claimModal").className = "modal open";
+}
+function claimFinish(take){
+  if (!claimOffer) return;
+  var mech = claimOffer.mech, left = "";
+  var e = pullEntryFor(mech, isoToUS(todayISO()), true);
+  claimOffer.rows.forEach(function(r){
+    if (take && r.on) e.parts = partsAdd(e.parts, r.num, r.qty);
+    else left = partsAdd(left, r.num, r.qty);
+  });
+  if (!e.parts){ DB.shop.splice(DB.shop.indexOf(e), 1); }
+  DB.meta.pendParts = left;
+  if (left) pendOrphan(); else { DB.meta.pendUntil = 0; save(); }
+  pullTouch(); lastPull = null; renderPullBar();
+  $("claimModal").className = "modal"; claimOffer = null;
+}
+$("btnClaimYes").onclick = function(){ claimFinish(true); };
+$("btnClaimNo").onclick = function(){ claimFinish(false); };
+function openOrphans(){
+  var log = (DB.meta.orphanLog || []).slice().reverse(), el = $("orphanList"); el.innerHTML = "";
+  if (!log.length) el.innerHTML = '<p style="color:#667">None yet.</p>';
+  for (var i=0;i<log.length && i<200;i++){
+    var d = new Date(log[i].t), row = document.createElement("div");
+    row.className = "partitem";
+    row.innerHTML = '<span class="pd"><b style="color:#fff">' + esc(log[i].parts) + '</b><small style="color:#667; display:block">' + (d.getMonth()+1) + "/" + d.getDate() + "/" + d.getFullYear() + " " + d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) + '</small></span>';
+    el.appendChild(row);
+  }
+  $("orphanModal").className = "modal open";
+}
+$("btnOrphanClose").onclick = function(){ $("orphanModal").className = "modal"; };
 function renderPullBar(){
   var bar = $("pullBar"); if (!bar) return;
   var mech = DB.meta.scanMech || "";
   bar.style.display = "flex";
-  var left = Math.max(0, Math.ceil(((DB.meta.scanUntil || 0) - Date.now()) / 1000));
-  var same = bar.getAttribute("data-key") === mech + "|" + (lastPull ? lastPull.num : "");
-  if (same && mech){ var lt = $("pullLeft"); if (lt){ lt.textContent = left + "s"; return; } }
-  bar.setAttribute("data-key", mech + "|" + (lastPull ? lastPull.num : ""));
-  bar.innerHTML = '<span class="pd">' + (mech ? 'Scanning as <b style="color:#fff">' + esc(mech) + '</b> <span id="pullLeft" style="color:#ffc857">' + left + 's</span>' : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>') +
+  var pend = pendParts(), orphans = orphanCount(30);
+  var left = Math.max(0, Math.ceil((((mech ? DB.meta.scanUntil : DB.meta.pendUntil) || 0) - Date.now()) / 1000));
+  var key = mech + "|" + (lastPull ? lastPull.num : "") + "|" + pend + "|" + orphans;
+  if (bar.getAttribute("data-key") === key){
+    if (!(mech || pend)) return;
+    var lt = $("pullLeft"); if (lt){ lt.textContent = left + "s"; return; }
+  }
+  bar.setAttribute("data-key", key);
+  var head = mech ? 'Scanning as <b style="color:#fff">' + esc(mech) + '</b> <span id="pullLeft" style="color:#ffc857">' + left + 's</span>'
+           : pend ? '<span style="color:#ff6b6b">No badge \u2014 holding ' + esc(pend) + '</span> <span id="pullLeft" style="color:#ffc857">' + left + 's</span> <span style="color:#9aa3b5">scan your badge to claim</span>'
+           : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>';
+  bar.innerHTML = '<span class="pd">' + head +
     (lastPull ? ' &middot; last: ' + esc(lastPull.num) + ' \u22121' : '') +
-    ' <small style="color:#667; display:block">Scan a bin here = 1 taken. Each scan gives you another minute; when it runs out, scan your badge again.</small></span>' +
+    ' <small style="color:#667; display:block">Scan a bin here = 1 taken. Each scan gives you another minute; when it runs out, scan your badge again.' +
+    (orphans ? ' <a id="lnkOrphans" style="color:#ff6b6b; text-decoration:underline; cursor:pointer">' + orphans + ' no-badge scan' + (orphans === 1 ? "" : "s") + ' in 30 days</a>' : '') + '</small></span>' +
     (lastPull ? '<button class="hbtn" id="btnPullUndo" style="min-height:40px; padding:6px 12px; font-size:14px">UNDO</button>' : '') +
     '<button class="hbtn" id="btnPullMech" style="min-height:40px; padding:6px 12px; font-size:14px; margin-left:8px">' + (mech ? "CHANGE" : "WHO?") + '</button>';
   var u = $("btnPullUndo"); if (u) u.onclick = pullUndo;
+  var lo = $("lnkOrphans"); if (lo) lo.onclick = openOrphans;
   $("btnPullMech").onclick = function(){
     var v = prompt("Who is pulling parts? (" + DB.mechanics.join(", ") + ")", mech);
     if (v === null) return;

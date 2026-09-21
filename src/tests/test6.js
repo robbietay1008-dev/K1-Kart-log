@@ -499,13 +499,29 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('badge window is counting down on the bar', await A.page.evaluate(() => DB.meta.scanUntil > Date.now() && /\d+s/.test($('pullLeft').textContent)));
   await A.page.evaluate(() => { DB.meta.scanUntil = Date.now() - 1; pullExpireCheck(); });
   ok('window ran out: name cleared, pulls kept', await A.page.evaluate(() => DB.meta.scanMech === '' && DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts === '59014 x2'));
-  await scan('59014');
-  ok('part scan with no badge does nothing', await A.page.evaluate(() => DB.inv['59014'] === 18));
-  await scan('K1-WESLEY'.replace('K1-', 'K1-MECH-'));
-  await scan('59014');
-  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').map(e => e.parts + '|' + e.mechanic).sort() }));
-  ok('new badge, new name: WESLEY pull is separate', s.a === 17 && s.pulls.join(';') === '59014 x1|WESLEY;59014 x2|ROBERT', s);
+  /* parts scanned with no badge: stock goes now, they wait for a badge */
+  await scan('59014'); await scan('SAK-6011');
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], b: DB.inv['SAK-6011'], pend: DB.meta.pendParts, bar: $('pullBar').textContent }));
+  ok('no badge: stock taken, parts held, bar says so', s.a === 17 && s.b === 9 && s.pend === '59014 x1, SAK-6011 x1' && /No badge/.test(s.bar), s);
   await scan('K1-UNDO');
+  ok('undo puts a held part back', await A.page.evaluate(() => DB.inv['SAK-6011'] === 10 && DB.meta.pendParts === '59014 x1'));
+  await scan('K1-MECH-WESLEY');
+  ok('badge right after → claim popup lists the held part', await A.page.evaluate(() => $('claimModal').className === 'modal open' && claimOffer.rows.length === 1 && claimOffer.rows[0].num === '59014'));
+  await A.page.click('#btnClaimYes'); await sleep(50);
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], pend: DB.meta.pendParts, pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').map(e => e.parts + '|' + e.mechanic).sort(), orphans: (DB.meta.orphanLog || []).length }));
+  ok('claimed: on WESLEY, nothing held, no orphan, stock not taken twice', s.a === 17 && s.pend === '' && s.pulls.join(';') === '59014 x1|WESLEY;59014 x2|ROBERT' && s.orphans === 0, s);
+  /* held parts nobody claims in time become no-badge scans, counted for the boss */
+  await A.page.evaluate(() => { DB.meta.scanMech = ''; DB.meta.scanUntil = 0; saveQuiet(); renderPullBar(); });
+  await scan('SAK-6011');
+  await A.page.evaluate(() => { DB.meta.pendUntil = Date.now() - 1; pullExpireCheck(); });
+  s = await A.page.evaluate(() => ({ b: DB.inv['SAK-6011'], pend: DB.meta.pendParts, orph: DB.shop.filter(e => e.usedFor === 'PULLED (no badge)').map(e => e.parts), n: orphanCount(30), bar: $('pullBar').textContent }));
+  ok('unclaimed → logged as no-badge scan, stock stays taken, count on the bar', s.b === 9 && s.pend === '' && s.orph.join() === 'SAK-6011 x1' && s.n === 1 && /1 no-badge scan/.test(s.bar), s);
+  await A.page.evaluate(() => { DB.shop = DB.shop.filter(e => e.usedFor !== 'PULLED (no badge)'); DB.inv['SAK-6011'] = 10; });
+  /* badge with "not mine" → same thing */
+  await scan('59014'); await scan('K1-MECH-JOHN'); await A.page.click('#btnClaimNo'); await sleep(50);
+  s = await A.page.evaluate(() => ({ n: orphanCount(30), john: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)' && e.mechanic === 'JOHN').length, orph: DB.shop.filter(e => e.usedFor === 'PULLED (no badge)').map(e => e.parts) }));
+  ok('"not mine" → no-badge scan, nothing on JOHN', s.n === 2 && s.john === 0 && s.orph.join() === '59014 x1', s);
+  await A.page.evaluate(() => { DB.shop = DB.shop.filter(e => e.usedFor !== 'PULLED (no badge)' && !(e.usedFor === 'PULLED (scanned)' && e.mechanic === 'WESLEY')); DB.inv['59014'] = 18; DB.meta.orphanLog = []; });
   await A.page.evaluate(() => { DB.meta.scanMech = 'ROBERT'; pullTouch(); saveQuiet(); renderPullBar(); });
   /* logging the work: picking the name offers the queued parts; approving fills them in */
   await A.page.evaluate(() => openKart('7'));
