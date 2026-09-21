@@ -495,6 +495,18 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await scan('K1-UNDO');
   s = await A.page.evaluate(() => ({ b: DB.inv['SAK-6011'], p: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts }));
   ok('undo puts the last one back', s.b === 10 && s.p === '59014 x2', s);
+  /* the badge only holds for a minute per scan; when it runs out the name drops off and a part scan needs a badge again */
+  ok('badge window is counting down on the bar', await A.page.evaluate(() => DB.meta.scanUntil > Date.now() && /\d+s/.test($('pullLeft').textContent)));
+  await A.page.evaluate(() => { DB.meta.scanUntil = Date.now() - 1; pullExpireCheck(); });
+  ok('window ran out: name cleared, pulls kept', await A.page.evaluate(() => DB.meta.scanMech === '' && DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts === '59014 x2'));
+  await scan('59014');
+  ok('part scan with no badge does nothing', await A.page.evaluate(() => DB.inv['59014'] === 18));
+  await scan('K1-WESLEY'.replace('K1-', 'K1-MECH-'));
+  await scan('59014');
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').map(e => e.parts + '|' + e.mechanic).sort() }));
+  ok('new badge, new name: WESLEY pull is separate', s.a === 17 && s.pulls.join(';') === '59014 x1|WESLEY;59014 x2|ROBERT', s);
+  await scan('K1-UNDO');
+  await A.page.evaluate(() => { DB.meta.scanMech = 'ROBERT'; pullTouch(); saveQuiet(); renderPullBar(); });
   /* logging the work: picking the name offers the queued parts; approving fills them in */
   await A.page.evaluate(() => openKart('7'));
   await A.page.click('#btnLog');

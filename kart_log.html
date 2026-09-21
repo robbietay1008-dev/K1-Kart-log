@@ -735,7 +735,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0920-1543";
+var APP_BUILD = "0921-1502";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -2354,8 +2354,8 @@ function scanCommand(code){
   if ((m = /^K1-MECH-(.+)$/.exec(code))){
     var name = m[1].replace(/-/g, " ");
     if (DB.mechanics.indexOf(name) === -1) DB.mechanics.push(name);
-    DB.meta.scanMech = name; save(); renderPullBar();
-    toast("Scanning as " + name);
+    DB.meta.scanMech = name; pullTouch(); save(); renderPullBar();
+    toast("Scanning as " + name + " \u2014 " + Math.round(PULL_WINDOW/1000) + "s per scan");
     return;
   }
   toast("Unknown command " + code, true);
@@ -2364,6 +2364,21 @@ function scanCommand(code){
 /* ================= PULLED PARTS (one scan = one taken) ================= */
 var PULL_TAG = "PULLED (scanned)";
 var lastPull = null;   /* { num, mech } for UNDO */
+/* Three guys share one scanner, so a badge only holds for a short window:
+   every part scan restarts it, and when it runs out the name drops off
+   (the parts are already saved). Scan the badge again to keep going.
+   Count mode has its own popup and doesn't use this. */
+var PULL_WINDOW = 60000, pullTick = null;
+function pullTouch(){ DB.meta.scanUntil = Date.now() + PULL_WINDOW; }
+function pullExpireCheck(){
+  if (!DB.meta.scanMech) return;
+  if (Date.now() >= (DB.meta.scanUntil || 0)){
+    var who = DB.meta.scanMech;
+    DB.meta.scanMech = ""; DB.meta.scanUntil = 0; lastPull = null; save(); renderPullBar();
+    toast(who + " done pulling \u2014 scan a badge to pull more");
+  } else renderPullBar();
+}
+pullTick = setInterval(pullExpireCheck, 1000);
 function pullEntryFor(mech, dateUS, make){
   for (var i=DB.shop.length-1;i>=0;i--){
     var e = DB.shop[i];
@@ -2386,6 +2401,8 @@ function partsAdd(str, num, delta){
 }
 function pullPart(num){
   var mech = DB.meta.scanMech || "";
+  if (!mech){ toast("Scan your badge first, then the part", true); return; }
+  pullTouch();
   var e = pullEntryFor(mech, isoToUS(todayISO()), true);
   e.parts = partsAdd(e.parts, num, 1);
   if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - 1); DB.invTouched[num] = Date.now(); }
@@ -2434,9 +2451,13 @@ function renderPullBar(){
   var bar = $("pullBar"); if (!bar) return;
   var mech = DB.meta.scanMech || "";
   bar.style.display = "flex";
-  bar.innerHTML = '<span class="pd">' + (mech ? 'Scanning as <b style="color:#fff">' + esc(mech) + '</b>' : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>') +
+  var left = Math.max(0, Math.ceil(((DB.meta.scanUntil || 0) - Date.now()) / 1000));
+  var same = bar.getAttribute("data-key") === mech + "|" + (lastPull ? lastPull.num : "");
+  if (same && mech){ var lt = $("pullLeft"); if (lt){ lt.textContent = left + "s"; return; } }
+  bar.setAttribute("data-key", mech + "|" + (lastPull ? lastPull.num : ""));
+  bar.innerHTML = '<span class="pd">' + (mech ? 'Scanning as <b style="color:#fff">' + esc(mech) + '</b> <span id="pullLeft" style="color:#ffc857">' + left + 's</span>' : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>') +
     (lastPull ? ' &middot; last: ' + esc(lastPull.num) + ' \u22121' : '') +
-    ' <small style="color:#667; display:block">Scan a bin here = 1 taken. It drops stock now and rides onto the kart when the work gets logged.</small></span>' +
+    ' <small style="color:#667; display:block">Scan a bin here = 1 taken. Each scan gives you another minute; when it runs out, scan your badge again.</small></span>' +
     (lastPull ? '<button class="hbtn" id="btnPullUndo" style="min-height:40px; padding:6px 12px; font-size:14px">UNDO</button>' : '') +
     '<button class="hbtn" id="btnPullMech" style="min-height:40px; padding:6px 12px; font-size:14px; margin-left:8px">' + (mech ? "CHANGE" : "WHO?") + '</button>';
   var u = $("btnPullUndo"); if (u) u.onclick = pullUndo;
@@ -2445,7 +2466,7 @@ function renderPullBar(){
     if (v === null) return;
     v = v.trim().toUpperCase();
     if (v && DB.mechanics.indexOf(v) === -1) DB.mechanics.push(v);
-    DB.meta.scanMech = v; save(); renderPullBar();
+    DB.meta.scanMech = v; if (v) pullTouch(); save(); renderPullBar();
   };
 }
 
