@@ -2374,7 +2374,8 @@ function scanCommand(code){
     else if ($("batUseModal").className.indexOf("open") > -1) $(done ? "btnBatUseSave" : "btnBatUseSkip").click();
     return;
   }
-  if ((m = /^K1-MECH-(.+)$/.exec(code))){
+  /* badge: K1-MECH-ROBERT, or the short K1-ROBERT (any name that isn't a command) */
+  if ((m = /^K1-MECH-(.+)$/.exec(code)) || (m = /^K1-([A-Z][A-Z\-]*)$/.exec(code))){
     var name = m[1].replace(/-/g, " ");
     if (DB.mechanics.indexOf(name) === -1) DB.mechanics.push(name);
     DB.meta.scanMech = name; pullTouch(); save(); renderPullBar();

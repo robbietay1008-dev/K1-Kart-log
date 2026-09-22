@@ -505,7 +505,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('no badge: stock taken, parts held, bar says so', s.a === 17 && s.b === 9 && s.pend === '59014 x1, SAK-6011 x1' && /No badge/.test(s.bar), s);
   await scan('K1-UNDO');
   ok('undo puts a held part back', await A.page.evaluate(() => DB.inv['SAK-6011'] === 10 && DB.meta.pendParts === '59014 x1'));
-  await scan('K1-MECH-WESLEY');
+  await scan('K1-WESLEY');   /* short badge form */
   ok('badge right after → claim popup lists the held part', await A.page.evaluate(() => $('claimModal').className === 'modal open' && claimOffer.rows.length === 1 && claimOffer.rows[0].num === '59014'));
   await A.page.click('#btnClaimYes'); await sleep(50);
   s = await A.page.evaluate(() => ({ a: DB.inv['59014'], pend: DB.meta.pendParts, pulls: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)').map(e => e.parts + '|' + e.mechanic).sort(), orphans: (DB.meta.orphanLog || []).length }));
