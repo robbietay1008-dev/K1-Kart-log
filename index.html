@@ -758,7 +758,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0921-1931";
+var APP_BUILD = "0926-1314";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -2356,8 +2356,8 @@ document.addEventListener("keydown", function(ev){
     }
     /* a part number scanned with nothing open = pulled off the shelf */
     if (burst.length >= 4 && !anyModalOpen() && $("scrHome").className.indexOf("active") > -1){
-      var num = scMatchPart(burst);
-      if (num) pullPart(num);
+      var pq = scParseQty(burst), num = scMatchPart(pq.raw);
+      if (num) pullPart(num, pq.qty);
       else toast("Not a part number: " + burst, true);
     }
   }, 200);
@@ -2425,30 +2425,31 @@ function partsAdd(str, num, delta){
   if (!hit && delta > 0) out.push(num + " x" + delta);
   return out.join(", ");
 }
-function pullPart(num){
+function pullPart(num, qty){
+  qty = qty || 1;
   var mech = DB.meta.scanMech || "";
-  if (!mech){ pendAdd(num); return; }
+  if (!mech){ pendAdd(num, qty); return; }
   pullTouch();
   var e = pullEntryFor(mech, isoToUS(todayISO()), true);
-  e.parts = partsAdd(e.parts, num, 1);
-  if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - 1); DB.invTouched[num] = Date.now(); }
-  lastPull = { num: num, mech: mech };
+  e.parts = partsAdd(e.parts, num, qty);
+  if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - qty); DB.invTouched[num] = Date.now(); }
+  lastPull = { num: num, mech: mech, qty: qty };
   save(); renderPullBar();
   var p = partRow(num);
-  toast(num + (p ? " " + pname(p) : "") + "  \u22121  \u00b7 stock " + (DB.inv[num] !== undefined ? DB.inv[num] : "?"));
+  toast(num + (p ? " " + pname(p) : "") + "  \u2212" + qty + "  \u00b7 stock " + (DB.inv[num] !== undefined ? DB.inv[num] : "?"));
 }
 function pullUndo(){
   if (!lastPull){ toast("Nothing to undo", true); return; }
   if (lastPull.pend){
-    DB.meta.pendParts = partsAdd(pendParts(), lastPull.num, -1);
-    if (DB.inv[lastPull.num] !== undefined){ DB.inv[lastPull.num] += 1; DB.invTouched[lastPull.num] = Date.now(); }
+    DB.meta.pendParts = partsAdd(pendParts(), lastPull.num, -(lastPull.qty || 1));
+    if (DB.inv[lastPull.num] !== undefined){ DB.inv[lastPull.num] += (lastPull.qty || 1); DB.invTouched[lastPull.num] = Date.now(); }
     toast("Undid " + lastPull.num); lastPull = null; save(); renderPullBar(); return;
   }
   var e = pullEntryFor(lastPull.mech, isoToUS(todayISO()), false);
   if (e){
-    e.parts = partsAdd(e.parts, lastPull.num, -1);
+    e.parts = partsAdd(e.parts, lastPull.num, -(lastPull.qty || 1));
     if (!e.parts){ DB.shop.splice(DB.shop.indexOf(e), 1); DB.tomb[e.id] = Date.now(); }
-    if (DB.inv[lastPull.num] !== undefined){ DB.inv[lastPull.num] += 1; DB.invTouched[lastPull.num] = Date.now(); }
+    if (DB.inv[lastPull.num] !== undefined){ DB.inv[lastPull.num] += (lastPull.qty || 1); DB.invTouched[lastPull.num] = Date.now(); }
   }
   toast("Undid " + lastPull.num);
   lastPull = null; save(); renderPullBar();
@@ -2484,11 +2485,12 @@ function reconcilePulls(partsStr, mech){
    no-badge scans so the boss can see how often it happens. */
 var PULL_ORPHAN_TAG = "PULLED (no badge)";
 function pendParts(){ return DB.meta.pendParts || ""; }
-function pendAdd(num){
-  DB.meta.pendParts = partsAdd(pendParts(), num, 1);
+function pendAdd(num, qty){
+  qty = qty || 1;
+  DB.meta.pendParts = partsAdd(pendParts(), num, qty);
   DB.meta.pendUntil = Date.now() + PULL_WINDOW;
-  if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - 1); DB.invTouched[num] = Date.now(); }
-  lastPull = { num: num, mech: "", pend: true };
+  if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - qty); DB.invTouched[num] = Date.now(); }
+  lastPull = { num: num, mech: "", pend: true, qty: qty };
   save(); renderPullBar();
   toast("No badge \u2014 holding " + num + ". Scan your badge to claim it.", true);
 }
@@ -2562,7 +2564,7 @@ function renderPullBar(){
   bar.style.display = "flex";
   var pend = pendParts(), orphans = orphanCount(30);
   var left = Math.max(0, Math.ceil((((mech ? DB.meta.scanUntil : DB.meta.pendUntil) || 0) - Date.now()) / 1000));
-  var key = mech + "|" + (lastPull ? lastPull.num : "") + "|" + pend + "|" + orphans;
+  var key = mech + "|" + (lastPull ? lastPull.num + "x" + (lastPull.qty || 1) : "") + "|" + pend + "|" + orphans;
   if (bar.getAttribute("data-key") === key){
     if (!(mech || pend)) return;
     var lt = $("pullLeft"); if (lt){ lt.textContent = left + "s"; return; }
@@ -2572,7 +2574,7 @@ function renderPullBar(){
            : pend ? '<span style="color:#ff6b6b">No badge \u2014 holding ' + esc(pend) + '</span> <span id="pullLeft" style="color:#ffc857">' + left + 's</span> <span style="color:#9aa3b5">scan your badge to claim</span>'
            : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>';
   bar.innerHTML = '<span class="pd">' + head +
-    (lastPull ? ' &middot; last: ' + esc(lastPull.num) + ' \u22121' : '') +
+    (lastPull ? ' &middot; last: ' + esc(lastPull.num) + ' \u2212' + (lastPull.qty || 1) : '') +
     ' <small style="color:#667; display:block">Scan a bin here = 1 taken. Each scan gives you another minute; when it runs out, scan your badge again.' +
     (orphans ? ' <a id="lnkOrphans" style="color:#ff6b6b; text-decoration:underline; cursor:pointer">' + orphans + ' no-badge scan' + (orphans === 1 ? "" : "s") + ' in 30 days</a>' : '') + '</small></span>' +
     (lastPull ? '<button class="hbtn" id="btnPullUndo" style="min-height:40px; padding:6px 12px; font-size:14px">UNDO</button>' : '') +
@@ -2640,6 +2642,13 @@ $("btnPulledAdd").onclick = function(){
 /* ================= SCAN-COUNT MODE ================= */
 var sc = null;        /* { num, val, typed } — the part that's up; null when nothing is */
 var scTimer = null;
+/* a box label can carry a quantity: "059945*100" (or "059945 x100") = 100 of 59945 */
+function scParseQty(raw){
+  var t = String(raw || "").trim();
+  var m = /^(.+?)\s*(?:\*|\s[xX])\s*(\d{1,4})$/.exec(t);
+  if (m && +m[2] > 0) return { raw: m[1], qty: +m[2] };
+  return { raw: t, qty: 1 };
+}
 function scMatchPart(raw){
   /* the label carries the part number; tolerate leading zeros either way */
   var q = String(raw || "").trim().toUpperCase().replace(/[^A-Z0-9\-\/]/g, "");
@@ -2691,10 +2700,10 @@ function scTake(){
   if (scanIsCode(raw)) return;
   $("scScan").value = "";
   if (!String(raw).trim()){ scSubmit(); scFocus(); return; }   /* bare Enter = submit */
-  var num = scMatchPart(raw);
+  var pq = scParseQty(raw), num = scMatchPart(pq.raw);
   if (!num){ $("scHint").textContent = "No part numbered \"" + String(raw).trim() + "\" — add it with + PART first."; toast("Not a part number: " + String(raw).trim(), true); scFocus(); return; }
-  if (sc && sc.num === num){ sc.val = (parseInt(sc.val, 10) || 0) + 1; sc.typed = false; }
-  else { if (sc) scSubmit(); sc = { num: num, val: 1, typed: false }; }
+  if (sc && sc.num === num){ sc.val = (parseInt(sc.val, 10) || 0) + pq.qty; sc.typed = false; }
+  else { if (sc) scSubmit(); sc = { num: num, val: pq.qty, typed: false }; }
   $("scHint").textContent = num + " \u2192 " + sc.val;
   scRender(); scFocus();
 }

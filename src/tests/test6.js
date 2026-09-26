@@ -217,11 +217,11 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   /* a second pallet a week later */
   await A.page.click('#btnBatBatch');
   await sleep(100);
-  await A.page.fill('#batDefRcv', '2026-09-26');
+  await A.page.fill('#batDefRcv', '2026-12-26');
   await A.page.type('#batScan', '6180407777');
   await A.page.keyboard.press('Enter');
   s = await A.page.evaluate(() => ({ n: batSorted().length, num: batNumber(batSorted()[2].id), rcv: batSorted()[2].b.rcv }));
-  ok('second pallet starts numbering at #1 again', s.n === 3 && s.num === 1 && s.rcv === '2026-09-26', s);
+  ok('second pallet starts numbering at #1 again', s.n === 3 && s.num === 1 && s.rcv === '2026-12-26', s);
   await A.page.click('#btnBatBatchDone');
 
   /* ---------- 2. logging a battery into a kart pops the pairing box ---------- */
@@ -369,7 +369,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await push(A);
   let t = batTab('BATTERIES 09-19-2026');
   ok('9/19 tab created', !!t);
-  ok('9/26 tab created', !!batTab('BATTERIES 09-26-2026'));
+  ok('12/26 tab created', !!batTab('BATTERIES 12-26-2026'));
   ok('the never-received one landed on a today tab', !!batTab(batTabNameJS(await A.page.evaluate(() => todayISO()))));
   ok('row 1 is Center / Date Received 9/19/2026', t[0][0] === 'Center:' && t[0][3] === 'Date Received:' && t[0][4] === '9/19/2026', t[0]);
   ok('row 2 is the title', t[1][0] === 'Battery Tracking Sheet');
@@ -383,13 +383,13 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
     ok('5554 install row carries kart 12 BAT 2 JS', inst && inst[5] === '12' && inst[6] === '2' && inst[8] === 'JS' && inst[9] === 'kart 12 BAT 2' && inst[3] === '8-24', inst); }
   ok('battery 2', t[4][0] === 2 && t[4][1] === '6180405554' && t[4][2] === '12' && t[4][3] === '9/21/2026' && t[4][4] === 'JS', t[4]);
   ok('30 numbered rows like the paper', t[32][0] === 30 && t[32][1] === '' && t.length >= 33, t.length);
-  let t2 = batTab('BATTERIES 09-26-2026');
-  ok('9/26 tab has its own #1 still on the shelf', t2[3][1] === '6180407777' && t2[3][2] === '' && t2[0][4] === '9/26/2026', t2[3]);
+  let t2 = batTab('BATTERIES 12-26-2026');
+  ok('12/26 tab has its own #1 still on the shelf', t2[3][1] === '6180407777' && t2[3][2] === '' && t2[0][4] === '12/26/2026', t2[3]);
 
   /* forms list in the app */
   await A.page.evaluate(() => { showScreen('scrBat'); renderBat(); });
   s = await A.page.evaluate(() => Array.from($('batForms').children).map(r => r.textContent));
-  ok('forms list shows the 9/19 and 9/26 dates, neither complete', s.length >= 2 && s[0].indexOf('9/26/2026') > -1 && s.filter(x => /9\/(19|26)\/2026/.test(x)).every(x => x.indexOf('COMPLETE') === -1), s);
+  ok('forms list shows the 9/19 and 12/26 dates, neither complete', s.length >= 2 && s[0].indexOf('12/26/2026') > -1 && s.filter(x => /(9\/19|12\/26)\/2026/.test(x)).every(x => x.indexOf('COMPLETE') === -1), s);
   /* fill the last shelf battery on 9/19 and the tab gets the done mark */
   await A.page.evaluate(() => { const id = batBySn('6180409549'); batAssign(id, '7', '3', '2026-09-22', 'RB'); save(); });
   await push(A);
@@ -405,7 +405,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   let pg = vm.runInContext(`handleGet({ parameter: { mode: 'formpdf', date: '2026-09-19' } })`, sandbox);
   ok('formpdf returns a page with an inline PDF download for that date', pg && pg._h.indexOf('download="Battery Tracking Sheet 09-19-2026.pdf"') > -1 && pg._h.indexOf('data:application/pdf;base64,JVBERg==') > -1 && pg._h.indexOf('complete</b>') > -1);
   vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-09-19' } })`, sandbox);
-  ok('formwipe removes the 9/19 tab', !tabs['BATTERIES 09-19-2026'] && !tabs['BATTERIES 09-19-2026 \u2713'] && !!tabs['BATTERIES 09-26-2026']);
+  ok('formwipe removes the 9/19 tab', !tabs['BATTERIES 09-19-2026'] && !tabs['BATTERIES 09-19-2026 \u2713'] && !!tabs['BATTERIES 12-26-2026']);
   ok('battery log still has 9549', tabs['BATTERY LOG']._g.some(r => r[1] === '6180409549'));
   vm.runInContext(`handleGet({ parameter: { mode: 'formwipe', date: '2026-09-19', undo: '1' } })`, sandbox);
   ok('undo brings the tab back', !!(tabs['BATTERIES 09-19-2026'] || tabs['BATTERIES 09-19-2026 \u2713']));
@@ -420,7 +420,7 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   /* Center is always Arlington, Tx */
   await push(A);
   ok('Center on the 9/19 tab', batTab('BATTERIES 09-19-2026')[0][1] === 'Arlington, Tx');
-  ok('Center on the 9/26 tab', batTab('BATTERIES 09-26-2026')[0][1] === 'Arlington, Tx');
+  ok('Center on the 12/26 tab', batTab('BATTERIES 12-26-2026')[0][1] === 'Arlington, Tx');
 
   /* ---------- 4. second device ---------- */
   console.log('\n4. device B pulls, edits, and the two merge');
@@ -446,8 +446,8 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.evaluate(() => { const id = batBySn('6180407777'); DB.tomb[id] = Date.now(); delete DB.bat[id]; save(); });
   await push(A); await pull(B);
   ok('deletion propagates to B', await B.page.evaluate(() => batBySn('6180407777')) === null);
-  { const e = batTab('BATTERIES 09-26-2026');
-    ok('the emptied 9/26 tab stays as a blank paper with its date', !!e && e[0][4] === '9/26/2026' && e[3][1] === '' && e[32][0] === 30, e && e.slice(0,4)); }
+  { const e = batTab('BATTERIES 12-26-2026');
+    ok('the emptied 12/26 tab stays as a blank paper with its date', !!e && e[0][4] === '12/26/2026' && e[3][1] === '' && e[32][0] === 30, e && e.slice(0,4)); }
   { const f = batTab('BATTERIES FORM');
     ok('a blank FORM tab is always present', !!f && f[1][0] === 'Battery Tracking Sheet' && f[0][4] === '' && f[0][1] === 'Arlington, Tx' && f[3][1] === '', f && f.slice(0,4)); }
   { const tt = batTab('BATTERIES 09-19-2026'); const sns = tt.slice(3).map(r => r[1]).filter(Boolean);
@@ -495,6 +495,13 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await scan('K1-UNDO');
   s = await A.page.evaluate(() => ({ b: DB.inv['SAK-6011'], p: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts }));
   ok('undo puts the last one back', s.b === 10 && s.p === '59014 x2', s);
+  /* a box label carries a quantity: one scan = 5 taken; undo gives all 5 back */
+  await scan('059014*5');
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], p: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts }));
+  ok('box label 059014*5 pulls 5 at once', s.a === 13 && s.p === '59014 x7', s);
+  await scan('K1-UNDO');
+  s = await A.page.evaluate(() => ({ a: DB.inv['59014'], p: DB.shop.filter(e => e.usedFor === 'PULLED (scanned)')[0].parts }));
+  ok('undo gives the whole box back', s.a === 18 && s.p === '59014 x2', s);
   /* the badge only holds for a minute per scan; when it runs out the name drops off and a part scan needs a badge again */
   ok('badge window is counting down on the bar', await A.page.evaluate(() => DB.meta.scanUntil > Date.now() && /\d+s/.test($('pullLeft').textContent)));
   await A.page.evaluate(() => { DB.meta.scanUntil = Date.now() - 1; pullExpireCheck(); });
@@ -549,6 +556,8 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.click('#btnInvScan'); await sleep(100);
   await scan('59014');
   ok('inside scan-count a part scan counts, it does not pull', await A.page.evaluate(() => sc && sc.num === '59014' && DB.inv['59014'] === 17));
+  await scan('59014*10');
+  ok('box label in count mode adds its quantity to the tally', await A.page.evaluate(() => sc && sc.num === '59014' && sc.val === 11));
   await scan('K1-CANCEL');
   ok('K1-CANCEL closes scan-count', await A.page.evaluate(() => $('scanCountModal').className === 'modal'));
   await A.page.evaluate(() => openKart('12'));
