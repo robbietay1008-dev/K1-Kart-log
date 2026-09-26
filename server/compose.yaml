@@ -1,0 +1,12 @@
+services:
+  kartlog:
+    build: .
+    container_name: kartlog
+    restart: unless-stopped
+    environment:
+      KARTLOG_ADMIN_TOKEN: ${KARTLOG_ADMIN_TOKEN:?set in .env}
+    volumes:
+      - /main/homelab/kartlog/data:/data
+    ports:
+      - "127.0.0.1:8090:8090"   # public app  -> tailscale funnel
+      - "127.0.0.1:8091:8091"   # admin       -> tailscale serve (tailnet only)

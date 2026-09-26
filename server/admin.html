@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kart Log admin</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262b36; --fg:#e6e9ef; --dim:#8a929e; --acc:#6fa0ff; --ok:#3dd68c; --warn:#ffd166; --bad:#ff6b6b; }
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif }
+  header { display:flex; align-items:center; gap:14px; padding:14px 18px; border-bottom:1px solid var(--line) }
+  header h1 { font-size:16px; margin:0; letter-spacing:.02em } header .dim { color:var(--dim); font-size:12px }
+  nav { display:flex; gap:6px; padding:10px 18px; flex-wrap:wrap } nav button { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:7px 12px; cursor:pointer }
+  nav button.on { border-color:var(--acc); color:var(--acc) }
+  main { padding:6px 18px 40px } section { display:none } section.on { display:block }
+  .cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; margin:10px 0 }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px } .card b { display:block; font-size:22px } .card span { color:var(--dim); font-size:12px }
+  table { width:100%; border-collapse:collapse; font-size:13px } th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align:top } th { color:var(--dim); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.06em }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px } .ok { color:var(--ok) } .warn { color:var(--warn) } .bad { color:var(--bad) } .dim { color:var(--dim) }
+  input, textarea, select { background:#0b0d11; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:inherit } textarea { width:100%; min-height:120px; font-family:ui-monospace,Menlo,monospace; font-size:12px }
+  .btn { background:var(--acc); color:#08111f; border:0; border-radius:8px; padding:8px 12px; font-weight:600; cursor:pointer } .btn.ghost { background:var(--card); color:var(--fg); border:1px solid var(--line) } .btn.bad { background:var(--bad); color:#fff }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0 } pre { background:#0b0d11; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; max-height:60vh; font-size:12px }
+  .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:11px; background:#22283a; color:#c9d2ff }
+</style>
+</head>
+<body>
+<header><a href="/" class="btn ghost" style="text-decoration:none">&#8592; app</a><h1>K1 KART LOG · data</h1><span class="dim" id="hdr">…</span><span style="flex:1"></span><input id="tok" placeholder="admin token" style="width:200px"><button class="btn ghost" onclick="saveTok()">use</button></header>
+<nav>
+  <button data-s="summary" class="on">summary</button><button data-s="karts">karts &amp; log</button><button data-s="inventory">inventory</button><button data-s="orders">orders</button>
+  <button data-s="batteries">batteries</button><button data-s="devices">devices &amp; codes</button><button data-s="audit">pushes</button>
+  <button data-s="quarantine">quarantine</button><button data-s="scripts">scripts &amp; export</button><button data-s="raw">raw data</button>
+</nav>
+<main>
+  <section id="summary" class="on"><div class="cards" id="cards"></div><div id="last" class="dim"></div>
+    <div class="row"><label>minimum app build <input id="minb" placeholder="0921-1430" style="width:120px"></label><button class="btn" onclick="setMin()">set</button><span class="dim">devices below it are told to update before they can sync</span></div>
+    <div class="row"><label>owner's mechanic name <input id="adminMech" placeholder="ROBERT" style="width:140px"></label><button class="btn" onclick="setAdminMech()">set</button><span class="dim">pre-filled on the owner's edition</span></div></section>
+  <section id="karts"><div class="row"><input id="kq" placeholder="filter: kart, action, part, mechanic" style="width:320px" oninput="renderKarts()"></div><div id="kartsBox"></div></section>
+  <section id="inventory"><div class="row"><input id="iq" placeholder="filter part / name" style="width:320px" oninput="renderInv()"><label><input type="checkbox" id="ilow" onchange="renderInv()"> only at/under reorder</label></div><div id="invBox"></div></section>
+  <section id="orders">
+    <h3>to order <span class="dim" id="needHint" style="font-weight:400;font-size:12px"></span></h3>
+    <p class="dim" style="margin:0 0 6px">Same as the sheet's APP NEEDED: tick ORDER, type ORDER QTY, then PLACE ORDER. Checks and quantities are saved as you go. NEEDED = at or under red, WANTED = under green.</p>
+    <div class="row"><input id="oq" placeholder="filter part / name" style="width:240px" oninput="renderNeed()"><label><input type="checkbox" id="oneed" onchange="renderNeed()"> NEEDED only</label>
+      <button class="btn ghost" onclick="tickShown(true)">check all shown</button><button class="btn ghost" onclick="tickShown(false)">clear all checks</button><button class="btn ghost" onclick="fillQty()">qty = to green on checked</button>
+      <span style="flex:1"></span><input id="ordNote" placeholder="note (supplier, PO #)" style="width:200px"><button class="btn" onclick="placeOrder()">PLACE ORDER</button></div>
+    <div id="needBox2"></div>
+    <h3 style="margin-top:22px">orders <label class="dim" style="font-weight:400;font-size:12px;margin-left:10px"><input type="checkbox" id="oall" onchange="loadOrders()"> show completed</label></h3>
+    <p class="dim" style="margin:0 0 6px">When boxes arrive, type what you have received so far on each line and BOOK RECEIVED: only the new amount is added to stock, so a split shipment is just a higher number later. Every device picks the new counts up on its next sync.</p>
+    <div id="ordBox"></div>
+  </section>
+  <section id="batteries"><div id="batBox"></div></section>
+  <section id="devices">
+    <h3>invite codes</h3><div class="row"><input id="invLabel" placeholder="label (e.g. Wesley's phone)"><input id="invMech" placeholder="mechanic (pre-fills their name)" style="width:200px"><input id="invUses" type="number" value="1" style="width:70px" title="max uses"><button class="btn" onclick="newInvite()">new code</button></div><div id="invBox2"></div>
+    <h3>devices</h3><div id="devBox"></div></section>
+  <section id="audit"><div id="auditBox"></div></section>
+  <section id="quarantine"><div id="qBox"></div></section>
+  <section id="scripts">
+    <h3>parts needed (at or under reorder point)</h3><p class="dim">A quick read-only look. To actually order and book what arrives, use the <a href="#" onclick="document.querySelector('nav button[data-s=orders]').click();return false">orders</a> tab.</p><div id="needBox"></div>
+    <h3>export</h3><div class="row"><a class="btn ghost" href="#" onclick="dl('/api/admin/export/entries.csv','entries.csv');return false">all log entries (CSV)</a><a class="btn ghost" href="#" onclick="dl('/api/admin/snapshot','snapshot.json');return false">full snapshot (JSON)</a></div>
+    <h3>import a snapshot</h3><p class="dim">Paste the JSON (or the JSONP from the sheet endpoint). It is merged like any push, never a replace.</p><textarea id="imp"></textarea><div class="row"><button class="btn" onclick="doImport()">merge it in</button><span id="impOut" class="dim"></span></div>
+  </section>
+  <section id="raw"><pre id="rawBox">…</pre></section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let TOK = localStorage.getItem('kl.admin.tok') || ''; $('tok').value = TOK;
+function saveTok(){ TOK = $('tok').value.trim(); localStorage.setItem('kl.admin.tok', TOK); boot(); }
+async function api(path, opt){ const o = Object.assign({ headers: {} }, opt || {}); o.headers['Authorization'] = 'Bearer ' + TOK; if (o.body && typeof o.body !== 'string') { o.body = JSON.stringify(o.body); o.headers['Content-Type'] = 'application/json'; } const r = await fetch(path, o); if (!r.ok) { throw new Error(r.status + ' ' + (await r.text()).slice(0, 200)); } return r.json(); }
+async function dl(path, name){ const r = await fetch(path, { headers: { Authorization: 'Bearer ' + TOK } }); const b = await r.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = name; a.click(); }
+const fmt = (t) => t ? new Date(t * 1000).toLocaleString() : '—';
+const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+let SNAP = null;
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => { document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('on', x === b)); document.querySelectorAll('main section').forEach((s) => s.classList.toggle('on', s.id === b.dataset.s)); load(b.dataset.s); });
+function askToken(msg){
+  let ov = document.getElementById('tokov');
+  if (!ov) { ov = document.createElement('div'); ov.id = 'tokov'; ov.style.cssText = 'position:fixed;inset:0;background:rgba(10,12,16,.96);display:flex;align-items:center;justify-content:center;z-index:50';
+    ov.innerHTML = '<div class="card" style="max-width:440px;width:92%"><h3 style="margin:0 0 8px">Admin token</h3><p class="dim" style="margin:0 0 10px">This page is for the shop owner. Paste the admin token once; it stays in this browser.<br>It lives on the server in <span class="mono">/main/homelab/kartlog/.env</span> (after <span class="mono">KARTLOG_ADMIN_TOKEN=</span>).</p><input id="tokin" placeholder="admin token" style="width:100%;margin-bottom:10px"><div class="row"><button class="btn" id="tokgo">unlock</button><span id="tokmsg" class="bad"></span></div></div>';
+    document.body.appendChild(ov);
+    $('tokgo').onclick = () => { TOK = $('tokin').value.trim(); localStorage.setItem('kl.admin.tok', TOK); $('tok').value = TOK; boot(); };
+    $('tokin').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('tokgo').click(); });
+  }
+  $('tokmsg').textContent = msg || ''; ov.style.display = 'flex'; $('tokin').focus();
+}
+async function boot(){
+  try { await load('summary', true); const ov = document.getElementById('tokov'); if (ov) ov.style.display = 'none'; }
+  catch (e) { if (/^403/.test(e.message)) askToken(TOK ? 'that token was not accepted' : ''); else $('hdr').textContent = 'cannot reach the server: ' + e.message; }
+}
+async function load(s, rethrow){
+  try {
+    if (s === 'summary') { const d = await api('/api/admin/summary'); const c = d.counts || {}; $('hdr').textContent = 'app build ' + d.build + ' · data version ' + d.version + ' · ' + (d.db_bytes/1048576).toFixed(1) + ' MB';
+      $('cards').innerHTML = [['karts', c.karts], ['log entries', c.entries], ['parts', c.parts], ['batteries', c.batteries], ['shop entries', c.shop], ['photos', d.photos.n], ['devices', d.devices], ['quarantined', d.quarantine]].map((x) => '<div class="card"><b>' + (x[1] == null ? '—' : x[1]) + '</b><span>' + x[0] + '</span></div>').join('');
+      $('last').textContent = d.last_push ? ('last push ' + fmt(d.last_push.at) + ' from ' + (d.last_push.device || '').slice(0, 6) + '… build ' + d.last_push.build) : 'no pushes yet'; $('minb').value = d.min_build || ''; api('/api/admin/settings').then((st) => { $('adminMech').value = st.admin_mechanic || ''; }); }
+    if (s === 'karts' || s === 'inventory' || s === 'batteries' || s === 'raw' || s === 'scripts') { if (!SNAP) { SNAP = (await api('/api/admin/snapshot')).snapshot; } }
+    if (s === 'karts') renderKarts(); if (s === 'inventory') renderInv(); if (s === 'batteries') renderBat();
+    if (s === 'orders') { await loadNeed(); await loadOrders(); }
+    if (s === 'raw') $('rawBox').textContent = JSON.stringify(SNAP, null, 1).slice(0, 400000);
+    if (s === 'devices') { const inv = await api('/api/admin/invites'); $('invBox2').innerHTML = '<table><tr><th>code</th><th>label</th><th>mechanic</th><th>uses</th><th>made</th><th></th></tr>' + inv.invites.map((i) => '<tr><td class="mono">' + esc(i.code) + '</td><td>' + esc(i.label) + '</td><td>' + esc(i.mechanic || '') + '</td><td>' + i.uses + '/' + i.max_uses + (i.revoked ? ' <span class="bad">revoked</span>' : '') + '</td><td>' + fmt(i.created_at) + '</td><td>' + (i.revoked ? '' : '<button class="btn ghost" onclick="revokeInvite(\'' + i.code + '\')">revoke</button>') + '</td></tr>').join('') + '</table>';
+      const dv = await api('/api/admin/devices'); $('devBox').innerHTML = '<table><tr><th>device</th><th>label</th><th>mechanic</th><th>build</th><th>pushes</th><th>last seen</th><th>enrolled</th><th></th></tr>' + dv.devices.map((d) => '<tr' + (d.revoked ? ' class="dim"' : '') + '><td class="mono">' + esc(d.token) + '</td><td>' + esc(d.label) + '</td><td><a href="#" onclick="setMech(\'' + d.ref + '\',\'' + esc(d.mechanic || '') + '\');return false">' + (esc(d.mechanic) || '<span class="dim">set…</span>') + '</a></td><td class="mono">' + esc(d.build) + '</td><td>' + d.pushes + '</td><td>' + fmt(d.last_seen) + '</td><td>' + fmt(d.created_at) + ' <span class="pill">' + esc(d.invite) + '</span></td><td>' + (d.revoked ? '<button class="btn ghost" onclick="revoke(\'' + d.ref + '\',1)">restore</button>' : '<button class="btn bad" onclick="revoke(\'' + d.ref + '\',0)">revoke</button>') + '</td></tr>').join('') + '</table>'; }
+    if (s === 'audit') { const a = await api('/api/admin/audit'); $('auditBox').innerHTML = '<table><tr><th>when</th><th>device</th><th>build</th><th>size</th><th>device saved at</th><th>what changed</th><th>v</th><th></th></tr>' + a.audit.map((r) => '<tr><td>' + fmt(r.at) + '</td><td class="mono">' + esc(r.device) + '</td><td class="mono">' + esc(r.build) + '</td><td>' + (r.bytes/1024).toFixed(0) + ' KB</td><td class="dim">' + esc(r.saved_at) + '</td><td class="mono">' + esc(JSON.stringify(r.report)) + '</td><td>' + r.version_after + '</td><td><a href="#" onclick="dl(\'/api/admin/audit/' + r.id + '\',\'push_' + r.id + '.json\');return false">json</a></td></tr>').join('') + '</table>'; }
+    if (s === 'quarantine') { const q = await api('/api/admin/quarantine'); $('qBox').innerHTML = q.quarantine.length ? '<table><tr><th>when</th><th>device</th><th>build</th><th>reason</th><th>size</th><th></th></tr>' + q.quarantine.map((r) => '<tr' + (r.resolved ? ' class="dim"' : '') + '><td>' + fmt(r.at) + '</td><td class="mono">' + esc(r.device) + '</td><td class="mono">' + esc(r.build) + '</td><td class="warn">' + esc(r.reason) + '</td><td>' + (r.bytes/1024).toFixed(0) + ' KB</td><td>' + (r.resolved ? 'resolved' : '<button class="btn ghost" onclick="qact(' + r.id + ',\'apply\')">merge anyway</button> <button class="btn ghost" onclick="qact(' + r.id + ',\'dismiss\')">dismiss</button>') + '</td></tr>').join('') + '</table>' : '<p class="ok">nothing quarantined</p>'; }
+    if (s === 'scripts') { const n = await api('/api/admin/needed'); $('needBox').innerHTML = n.needed.length ? '<table><tr><th>part</th><th>name</th><th>qty</th><th>reorder at</th><th>order</th></tr>' + n.needed.map((p) => '<tr><td class="mono">' + esc(p.part) + '</td><td>' + esc(p.name) + '</td><td class="' + (p.qty <= 0 ? 'bad' : 'warn') + '">' + p.qty + '</td><td>' + p.reorder + '</td><td>' + p.order + '</td></tr>').join('') + '</table>' : '<p class="ok">nothing under its reorder point</p>'; }
+  } catch (e) { if (rethrow) throw e; if (/^403/.test(e.message)) askToken('that token was not accepted'); else alert(e.message); }
+}
+function renderKarts(){ const q = $('kq').value.toLowerCase(); const karts = SNAP.karts || {}; const keys = Object.keys(karts).sort((a, b) => (+a) - (+b)); let html = '';
+  for (const k of keys) { const v = karts[k]; const es = (v.entries || []).filter((e) => !q || (k + ' ' + e.action + ' ' + e.parts + ' ' + e.mechanic + ' ' + e.notes).toLowerCase().includes(q)); if (q && !es.length && !k.includes(q)) continue;
+    const st = v.status || {}; html += '<h3>Kart ' + k + ' <span class="dim" style="font-weight:400;font-size:12px">chain ' + esc(st.chain) + ' · diff ' + esc(st.diff) + ' · brake ' + esc(st.brake) + ' · welds ' + esc(st.weld) + (v.knotes ? ' · ' + esc(v.knotes) : '') + '</span></h3>';
+    if (es.length) html += '<table><tr><th>date</th><th>action</th><th>parts</th><th>mechanic</th><th>notes</th></tr>' + es.slice().reverse().map((e) => '<tr><td>' + esc(e.date) + '</td><td>' + esc(e.action) + '</td><td class="mono">' + esc(e.parts) + '</td><td>' + esc(e.mechanic) + '</td><td class="dim">' + esc(e.notes) + (e.photos && e.photos.length ? ' 📷' + e.photos.length : '') + '</td></tr>').join('') + '</table>'; }
+  $('kartsBox').innerHTML = html || '<p class="dim">nothing matches</p>'; }
+function renderInv(){ const q = $('iq').value.toLowerCase(); const low = $('ilow').checked; const cfg = SNAP.invCfg || {}, inv = SNAP.inv || {}, tomb = SNAP.partTomb || {}; const rows = Object.keys(cfg).filter((n) => !tomb[n]).sort();
+  const out = rows.filter((n) => (!q || (n + ' ' + (cfg[n].n || '')).toLowerCase().includes(q)) && (!low || (+cfg[n].r > 0 && +(inv[n] || 0) <= +cfg[n].r)));
+  $('invBox').innerHTML = '<p class="dim">' + out.length + ' of ' + rows.length + ' parts</p><table><tr><th>part</th><th>name</th><th>qty</th><th>reorder</th><th>target</th><th>kind</th><th>counted</th></tr>' + out.map((n) => { const c = cfg[n]; const qty = +(inv[n] || 0); return '<tr><td class="mono">' + esc(n) + '</td><td>' + esc(c.n) + '</td><td class="' + (c.r > 0 && qty <= c.r ? (qty <= 0 ? 'bad' : 'warn') : '') + '">' + qty + '</td><td>' + esc(c.r) + '</td><td>' + esc(c.g) + '</td><td>' + esc(c.k) + '</td><td>' + ((SNAP.invCounted || {})[n] ? '✓' : '') + '</td></tr>'; }).join('') + '</table>'; }
+function renderBat(){ const b = SNAP.bat || {}; const rows = Object.values(b).sort((x, y) => (x.sn || '').localeCompare(y.sn || '')); $('batBox').innerHTML = '<table><tr><th>serial</th><th>received</th><th>battery date</th><th>status</th><th>kart</th><th>pos</th><th>date used</th><th>initials</th><th>history</th></tr>' + rows.map((r) => '<tr><td class="mono">' + esc(r.sn) + '</td><td>' + esc(r.rcv) + '</td><td>' + esc(r.bd) + '</td><td>' + esc(r.st) + '</td><td>' + esc(r.kart) + '</td><td>' + esc(r.pos) + '</td><td>' + esc(r.date) + '</td><td>' + esc(r.ini) + '</td><td class="dim">' + ((r.h || []).length) + ' events</td></tr>').join('') + '</table>'; }
+async function setAdminMech(){ await api('/api/admin/settings', { method: 'POST', body: { admin_mechanic: $('adminMech').value } }); load('summary'); }
+async function setMin(){ await api('/api/admin/settings', { method: 'POST', body: { min_build: $('minb').value } }); load('summary'); }
+async function newInvite(){ const r = await api('/api/admin/invites', { method: 'POST', body: { label: $('invLabel').value, mechanic: $('invMech').value, max_uses: +$('invUses').value || 1 } }); alert('code: ' + r.code + (r.mechanic ? '  (pre-fills ' + r.mechanic + ')' : '') + '\n\nType it into the app on the device (Settings → shop server).'); load('devices'); }
+async function setMech(ref, cur){ const m = prompt('Mechanic name for this device (blank = none):', cur || ''); if (m === null) return; await api('/api/admin/devices/mechanic', { method: 'POST', body: { ref, mechanic: m } }); load('devices'); }
+async function revokeInvite(code){ await api('/api/admin/invites/revoke', { method: 'POST', body: { code } }); load('devices'); }
+async function revoke(ref, restore){ if (!restore && !confirm('Revoke this device? It will need a new code to sync again.')) return; await api('/api/admin/devices/revoke', { method: 'POST', body: { ref, restore } }); load('devices'); }
+async function qact(id, action){ if (action === 'apply' && !confirm('Merge this quarantined push anyway?')) return; await api('/api/admin/quarantine/' + id + '/' + action, { method: 'POST' }); SNAP = null; load('quarantine'); }
+/* ---- orders: the sheet's APP NEEDED -> Place order -> APP ORDERS -> Book received, on the server ---- */
+let NEED = [];
+async function loadNeed(){ NEED = (await api('/api/admin/orders/needed')).needed; renderNeed(); }
+function needShown(){ const q = $('oq').value.toLowerCase(), only = $('oneed').checked; return NEED.filter((r) => (!q || (r.part + ' ' + r.name).toLowerCase().includes(q)) && (!only || r.status === 'NEEDED')); }
+function renderNeed(){
+  const rows = needShown(); const checked = NEED.filter((r) => r.chk); const units = checked.reduce((a, r) => a + (+r.order_qty || 0), 0);
+  $('needHint').textContent = NEED.length + ' parts (' + NEED.filter((r) => r.status === 'NEEDED').length + ' needed) · ' + checked.length + ' checked, ' + units + ' units';
+  $('needBox2').innerHTML = rows.length ? '<table><tr><th>order ✓</th><th>part</th><th>name</th><th>qty now</th><th>red ≤</th><th>green ≥</th><th>status</th><th>to green</th><th>order qty</th></tr>' + rows.map((r) =>
+    '<tr><td><input type="checkbox" ' + (r.chk ? 'checked' : '') + ' onchange="draft(\'' + r.part + '\', this.checked, null)"></td><td class="mono">' + esc(r.part) + '</td><td>' + esc(r.name) + '</td><td class="' + (r.status === 'NEEDED' ? (r.qty <= 0 ? 'bad' : 'warn') : '') + '">' + r.qty + '</td><td>' + r.red + '</td><td>' + r.green + '</td><td class="' + (r.status === 'NEEDED' ? 'bad' : 'warn') + '">' + r.status + '</td><td>' + r.to_green + '</td><td><input type="number" min="0" style="width:80px" value="' + (r.order_qty == null ? '' : r.order_qty) + '" placeholder="' + r.to_green + '" onchange="draft(\'' + r.part + '\', null, this.value)"></td></tr>').join('') + '</table>'
+    : '<p class="ok">nothing to order' + (NEED.length ? ' matches the filter' : ' - every tracked part is at or above its green level') + '</p>';
+}
+async function draft(part, chk, qty){ const r = NEED.find((x) => x.part === part); if (!r) return; if (chk !== null) r.chk = chk; if (qty !== null) r.order_qty = qty === '' ? null : +qty;
+  try { await api('/api/admin/orders/draft', { method: 'POST', body: { part, chk: r.chk, qty: r.order_qty } }); } catch (e) { alert(e.message); } renderNeed(); }
+async function tickShown(on){ const rows = on ? needShown() : NEED.filter((r) => r.chk); if (!rows.length) return; rows.forEach((r) => { r.chk = on; }); await api('/api/admin/orders/draft', { method: 'POST', body: { rows: rows.map((r) => ({ part: r.part, chk: r.chk, qty: r.order_qty })) } }); renderNeed(); }
+async function fillQty(){ const rows = NEED.filter((r) => r.chk && (r.order_qty == null || r.order_qty === '')); if (!rows.length) { alert('Every checked row already has an ORDER QTY (or nothing is checked).'); return; } rows.forEach((r) => { r.order_qty = r.to_green; }); await api('/api/admin/orders/draft', { method: 'POST', body: { rows: rows.map((r) => ({ part: r.part, chk: 1, qty: r.order_qty })) } }); renderNeed(); }
+async function placeOrder(){ const checked = NEED.filter((r) => r.chk); if (!checked.length) { alert('Nothing checked.'); return; } const noQty = checked.filter((r) => !(+r.order_qty > 0)).length;
+  if (!confirm('Place an order for ' + (checked.length - noQty) + ' item(s)?' + (noQty ? '\n\n' + noQty + ' checked item(s) have no ORDER QTY and will be SKIPPED (they stay checked).' : ''))) return;
+  try { const r = await api('/api/admin/orders/place', { method: 'POST', body: { note: $('ordNote').value } }); $('ordNote').value = ''; alert('Order ' + r.order + ' logged: ' + r.lines + ' items, ' + r.units + ' units.' + (r.skipped ? '\n\n' + r.skipped + ' checked item(s) skipped - no ORDER QTY typed.' : '') + '\n\nWhen boxes arrive, type what you got on the order and BOOK RECEIVED.'); }
+  catch (e) { alert(e.message); } await loadNeed(); await loadOrders(); }
+async function loadOrders(){ const d = await api('/api/admin/orders?all=' + ($('oall').checked ? 1 : 0));
+  $('ordBox').innerHTML = d.orders.length ? d.orders.map((o) => '<div class="card" style="margin:10px 0" id="ord_' + o.id + '"><div class="row" style="margin:0 0 6px"><b style="font-size:15px" class="mono">' + esc(o.id) + '</b><span class="dim">' + fmt(o.at) + '</span>' + (o.note ? '<span class="pill">' + esc(o.note) + '</span>' : '') + '<span class="' + (o.open ? 'warn' : 'ok') + '">' + o.booked + ' / ' + o.ordered + ' units ' + (o.open ? 'received so far' : 'received - complete') + '</span><span style="flex:1"></span>' +
+      (o.open ? '<button class="btn ghost" onclick="allArrived(\'' + o.id + '\')">all arrived</button><button class="btn" onclick="bookOrder(\'' + o.id + '\')">BOOK RECEIVED</button>' : '') + '<button class="btn ghost" onclick="copyOrder(\'' + o.id + '\')">copy as text</button>' + (o.booked ? '' : '<button class="btn bad" onclick="cancelOrder(\'' + o.id + '\')">cancel</button>') + '</div>' +
+      '<table><tr><th>part</th><th>name</th><th>ordered</th><th>booked into stock</th><th>received so far</th><th>last booked</th></tr>' + o.lines.map((l) => '<tr><td class="mono">' + esc(l.part) + '</td><td>' + esc(l.name) + '</td><td>' + l.ordered + '</td><td class="' + (l.booked >= l.ordered ? 'ok' : (l.booked ? 'warn' : 'dim')) + '">' + l.booked + '</td><td>' + (l.booked >= l.ordered ? '<span class="ok">✓ ' + l.booked + '</span>' : '<input type="number" min="' + l.booked + '" data-line="' + l.id + '" data-booked="' + l.booked + '" value="' + l.booked + '" style="width:80px">') + '</td><td class="dim">' + (l.last_booked ? fmt(l.last_booked) : '') + '</td></tr>').join('') + '</table></div>').join('')
+    : '<p class="dim">no open orders' + (d.closed ? ' (' + d.closed + ' completed - tick "show completed")' : '') + '</p>';
+}
+function allArrived(oid){ document.querySelectorAll('#ord_' + oid + ' input[data-line]').forEach((i) => { const row = i.closest('tr'); i.value = row.children[2].textContent; }); }
+async function bookOrder(oid){ const lines = []; document.querySelectorAll('#ord_' + oid + ' input[data-line]').forEach((i) => { const v = +i.value, b = +i.dataset.booked; if (v !== b) lines.push({ id: +i.dataset.line, received: v }); });
+  if (!lines.length) { alert('Nothing new to book - "received so far" matches what is already booked on every line.'); return; }
+  try { const r = await api('/api/admin/orders/receive', { method: 'POST', body: { lines } }); let msg = r.booked.length + ' line(s), ' + r.units + ' unit(s) booked into stock:\n' + r.booked.map((b) => '  ' + b.part + '  +' + b.qty + '  (' + b.before + ' → ' + b.after + ')' + (b.deleted_part ? '  ⚠ this part was deleted from the catalog' : '')).join('\n');
+    if (r.skipped.length) msg += '\n\nSkipped:\n' + r.skipped.map((s) => '  ' + (s.part || s.id) + ': ' + s.why).join('\n'); alert(msg); }
+  catch (e) { alert(e.message); } SNAP = null; await loadOrders(); await loadNeed(); }
+async function copyOrder(oid){ const r = await fetch('/api/admin/orders/' + oid + '/text', { headers: { Authorization: 'Bearer ' + TOK } }); const t = await r.text(); try { await navigator.clipboard.writeText(t); alert('Copied:\n\n' + t); } catch (e) { prompt('Copy this:', t); } }
+async function cancelOrder(oid){ if (!confirm('Cancel ' + oid + '? Nothing from it has been booked, so it just disappears.')) return; try { await api('/api/admin/orders/' + oid + '/cancel', { method: 'POST' }); } catch (e) { alert(e.message); } await loadOrders(); }
+async function doImport(){ $('impOut').textContent = 'merging…'; try { const r = await fetch('/api/admin/import', { method: 'POST', headers: { Authorization: 'Bearer ' + TOK, 'Content-Type': 'text/plain' }, body: $('imp').value }); const j = await r.json(); $('impOut').textContent = JSON.stringify(j).slice(0, 300); SNAP = null; } catch (e) { $('impOut').textContent = e.message; } }
+boot();
+</script>
+</body>
+</html>
