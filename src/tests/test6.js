@@ -461,27 +461,40 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   ok('scan-count popup open, scan box focused', await A.page.evaluate(() => $('scanCountModal').className === 'modal open' && document.activeElement === $('scScan')));
   await A.page.type('#scScan', '059014');      /* label with a leading zero, no Enter */
   await sleep(400);
-  ok('leading-zero label finds the part, count starts at 1', await A.page.evaluate(() => sc && sc.num === '59014' && sc.val === 1 && $('scPartWrap').style.display === 'block' && $('scOld').textContent === '20'));
+  const tal = () => A.page.evaluate(() => JSON.stringify(DB.meta.scTally));
+  ok('leading-zero label finds the part, tally starts at 1, old count shown', await A.page.evaluate(() => sc && sc.num === '59014' && DB.meta.scTally['59014'] === 1 && $('scPartWrap').style.display === 'block' && $('scOld').textContent === '20'));
   await A.page.type('#scScan', '59014'); await sleep(320);
   await A.page.type('#scScan', '59014'); await sleep(320);
-  ok('same label twice more = 3', await A.page.evaluate(() => sc.val === 3 && $('scVal').textContent === '3'));
+  ok('same label twice more = 3, nothing posted yet', await A.page.evaluate(() => DB.meta.scTally['59014'] === 3 && $('scVal').textContent === '3' && DB.inv['59014'] === 20));
+  await A.page.type('#scScan', 'SAK-6011'); await sleep(320);
+  await A.page.type('#scScan', 'SAK-6011'); await sleep(320);
+  ok('switching parts keeps both tallies, still nothing posted', await A.page.evaluate(() => DB.meta.scTally['59014'] === 3 && DB.meta.scTally['SAK-6011'] === 2 && DB.inv['59014'] === 20 && DB.inv['SAK-6011'] === 54 && $('scList').children.length === 2));
+  await A.page.type('#scScan', '059014*100'); await sleep(320);
+  ok('box label later ADDS to the earlier tally: 3 + 100 = 103', await A.page.evaluate(() => DB.meta.scTally['59014'] === 103 && sc.num === '59014' && $('scVal').textContent === '103'));
+  await A.page.keyboard.press('Enter'); await sleep(120);
+  ok('bare Enter posts nothing', await A.page.evaluate(() => DB.inv['59014'] === 20 && DB.meta.scTally['59014'] === 103));
+  /* tap SAK-6011 in the list and fix it on the pad */
+  await A.page.evaluate(() => Array.from($('scList').children).find(d => d.textContent.indexOf('SAK-6011') > -1).click());
   await A.page.evaluate(() => { const b = Array.from($('scPad').children); const press = t => b.find(x => x.textContent === t).click(); press('1'); press('7'); });
-  ok('typing on the pad replaces it with 17', await A.page.evaluate(() => sc.val === 17 && $('scVal').textContent === '17'));
-  await A.page.keyboard.press('Enter');
-  await sleep(120);
-  ok('Enter submits: saved as counted, box still live', await A.page.evaluate(() => DB.inv['59014'] === 17 && DB.invCounted['59014'] === 1 && sc === null && document.activeElement === $('scScan')));
+  ok('tap a part in the list, pad replaces its tally with 17', await A.page.evaluate(() => sc.num === 'SAK-6011' && DB.meta.scTally['SAK-6011'] === 17));
   await A.page.type('#scScan', 'SAK-6011'); await sleep(320);
-  await A.page.type('#scScan', 'SAK-6011'); await sleep(320);
-  ok('alphanumeric label tallies to 2', await A.page.evaluate(() => sc && sc.num === 'SAK-6011' && sc.val === 2));
-  await A.page.type('#scScan', '59014'); await sleep(320);
-  ok('scanning a different part submits SAK-6011 = 2 and opens 59014 at 1', await A.page.evaluate(() => DB.inv['SAK-6011'] === 2 && sc.num === '59014' && sc.val === 1));
-  await A.page.click('#btnScSkip');
-  ok('skip drops it without saving', await A.page.evaluate(() => sc === null && DB.inv['59014'] === 17));
+  ok('and scanning it again adds on: 18', await A.page.evaluate(() => DB.meta.scTally['SAK-6011'] === 18));
   await A.page.type('#scScan', '999999'); await sleep(400);
-  ok('unknown number is refused', await A.page.evaluate(() => sc === null && $('scHint').textContent.indexOf('No part numbered') === 0));
+  ok('unknown number is refused', await A.page.evaluate(() => $('scHint').textContent.indexOf('No part numbered') === 0 && !DB.meta.scTally['999999']));
+  /* close and reopen: the session is still there */
+  await A.page.evaluate(() => { $('scanCountModal').className = 'modal'; });
+  await A.page.click('#btnInvScan'); await sleep(100);
+  ok('reopening picks the unsaved session back up', await A.page.evaluate(() => DB.meta.scTally['59014'] === 103 && $('scList').children.length === 2 && /aren.t saved yet/.test($('scHint').textContent)));
   await A.page.type('#scScan', '59014'); await sleep(320);
-  await A.page.click('#btnScDone');
-  ok('done submits the open part (1) and closes', await A.page.evaluate(() => DB.inv['59014'] === 1 && $('scanCountModal').className === 'modal'));
+  ok('SAVE button names how many parts', await A.page.evaluate(() => $('btnScDone').textContent === 'SAVE 2 PARTS'));
+  await A.page.click('#btnScDone'); await sleep(120);
+  ok('SAVE posts every tally as the new count and closes', await A.page.evaluate(() => DB.inv['59014'] === 104 && DB.inv['SAK-6011'] === 18 && DB.invCounted['59014'] === 1 && DB.invCounted['SAK-6011'] === 1 && Object.keys(DB.meta.scTally).length === 0 && $('scanCountModal').className === 'modal'));
+  /* cancel throws a session away */
+  await A.page.click('#btnInvScan'); await sleep(100);
+  await A.page.type('#scScan', '59014'); await sleep(320);
+  await A.page.click('#btnScCancel'); await sleep(120);
+  ok('Cancel (confirmed) discards the session, stock untouched', await A.page.evaluate(() => DB.inv['59014'] === 104 && Object.keys(DB.meta.scTally).length === 0 && $('scanCountModal').className === 'modal'));
+  await A.page.evaluate(() => { DB.inv['59014'] = 20; saveQuiet(); });
 
   /* ---------- 4c. one scan = one part taken ---------- */
   console.log('\n4c. pull parts by scanning');
@@ -555,11 +568,11 @@ const toast = d => d.page.evaluate(() => $('toast').textContent);
   await A.page.evaluate(() => { showScreen('scrHome'); renderHome(); $('btnInv').click(); });
   await A.page.click('#btnInvScan'); await sleep(100);
   await scan('59014');
-  ok('inside scan-count a part scan counts, it does not pull', await A.page.evaluate(() => sc && sc.num === '59014' && DB.inv['59014'] === 17));
+  ok('inside scan-count a part scan counts, it does not pull', await A.page.evaluate(() => sc && sc.num === '59014' && DB.meta.scTally['59014'] === 1 && DB.inv['59014'] === 17));
   await scan('59014*10');
-  ok('box label in count mode adds its quantity to the tally', await A.page.evaluate(() => sc && sc.num === '59014' && sc.val === 11));
+  ok('box label in count mode adds its quantity to the tally', await A.page.evaluate(() => sc && sc.num === '59014' && DB.meta.scTally['59014'] === 11));
   await scan('K1-CANCEL');
-  ok('K1-CANCEL closes scan-count', await A.page.evaluate(() => $('scanCountModal').className === 'modal'));
+  ok('K1-CANCEL throws the count away and closes', await A.page.evaluate(() => $('scanCountModal').className === 'modal' && DB.inv['59014'] === 17 && !DB.meta.scTally['59014']));
   await A.page.evaluate(() => openKart('12'));
 
   /* ---------- 5. restore path ---------- */
