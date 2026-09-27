@@ -357,7 +357,7 @@
       <div style="color:#9aa3b5; font-weight:700; font-size:13px; margin-bottom:4px">THIS SESSION &mdash; tap one to fix its number</div>
       <div id="scList"></div>
     </div>
-    <div class="mactions" style="display:flex">
+    <div class="mactions" style="display:flex; position:sticky; bottom:0; z-index:2; background:#181b22; margin-top:12px; padding:10px 0 calc(10px + env(safe-area-inset-bottom))">
       <button class="hbtn" id="btnScCancel" style="flex:1; margin-right:10px">Cancel</button>
       <button class="hbtn red" id="btnScDone" style="flex:2">SAVE</button>
     </div>
@@ -762,7 +762,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0927-1526";
+var APP_BUILD = "0927-1800";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -2663,7 +2663,7 @@ function scMatchPart(raw){
   for (var z=1; z<=3; z++){ var pad = new Array(z+1).join("0") + bare; if (DB.invCfg[pad]) return pad; }
   return "";
 }
-function scFocus(){ setTimeout(function(){ try { if ($("scanCountModal").className.indexOf("open") > -1) $("scScan").focus(); } catch(e){} }, 30); }
+function scFocus(){ setTimeout(function(){ try { if ($("scanCountModal").className.indexOf("open") > -1) $("scScan").focus({ preventScroll: true }); } catch(e){} }, 30); }
 function scProgress(){
   var total = 0, counted = 0;
   for (var n in DB.invCfg){ total++; if (DB.invCounted[n]) counted++; }
@@ -2778,7 +2778,14 @@ $("btnScCancel").onclick = function(){
   DB.meta.scTally = {}; sc = null; saveQuiet();
   $("scanCountModal").className = "modal"; renderInv();
 };
-$("scScan").addEventListener("blur", function(){ if ($("scanCountModal").className.indexOf("open") > -1) scFocus(); });
+/* Keep the scanner's box focused, but never by scrolling, and not while a button in the popup is being pressed:
+   the refocus used to scroll the popup back up to the box between mouse-down and mouse-up, so with a long session
+   (SAVE thousands of px down the list) the click never landed and SAVE looked dead. */
+$("scScan").addEventListener("blur", function(ev){
+  var to = ev && ev.relatedTarget;
+  if (to && $("scanCountModal").contains(to)) return;
+  if ($("scanCountModal").className.indexOf("open") > -1) scFocus();
+});
 scRenderPad();
 
 function openInvModal(num){
