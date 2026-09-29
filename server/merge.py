@@ -8,6 +8,15 @@ everything that has a stamp. Nothing is ever replaced wholesale, so a stale devi
 that is genuinely new - it cannot blank a section it does not know about (the failure the sheet receiver had).
 
 merge(canonical, incoming, now_ms) -> (canonical, report)   report lists what changed, for the audit log.
+
+Anything a device sends ends up on every other device and in the owner's edition, so values that the app never
+produces are refused here (report["rejected"] / report["rejected_what"]) instead of being passed on: kart keys
+that are not kart numbers (a device push with one is quarantined by sanity(); the owner's "merge anyway" skips
+that and they are refused here one by one), single kart status fields (that field keeps the server's value, the
+rest of the kart still merges), entry dates, part numbers with < > ` or control characters (quotes are allowed:
+an inch mark is a real part number, and every page escapes them), photo ids with markup characters, counts that
+are not numbers, photo links that are not the server's own /api/photo/ route or https. Free text (actions,
+notes, part names) is allowed and escaped by the pages that show it.
 """
 import copy
 import re
@@ -15,6 +24,14 @@ import time
 
 SECTIONS = ("karts", "shop", "quicks", "inv", "invCfg", "tomb", "stamps", "invTouched", "invCounted",
             "cfgTouched", "partTomb", "rekeys", "bat", "rc", "photos")
+
+KART_KEY = re.compile(r"^[1-9][0-9]?$")            # the app's karts are numbered (1-53 today; two digits leaves room)
+_MARKUP = re.compile(r"[<>\"'`\x00-\x1f\x7f]")      # never in a date, a status value or an id
+_PART_BAD = re.compile(r"[<>`\x00-\x1f\x7f]")       # part numbers may carry quotes (3/8" BOLT); every renderer escapes them
+_STATUS_FIELD = re.compile(r"^[A-Za-z0-9_]{1,24}$")
+_PHOTO_ID = re.compile(r"^[A-Za-z0-9_.-]{1,81}$")
+_PHOTO_URL = re.compile(r"^(/api/photo/[A-Za-z0-9_.-]{1,81}|https://[^\s<>\"'`\\]{1,500})$")
+_REJECT_LIST_MAX = 20
 
 
 def empty_snapshot():
@@ -36,6 +53,73 @@ def _num(x, default=0):
         return float(x)
     except (TypeError, ValueError):
         return default
+
+
+def _is_num(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool)
+
+
+def _label(x):
+    """a device-supplied key, made safe to show in the audit log and the WATCH screen"""
+    return re.sub(r"[^A-Za-z0-9 _./-]", "?", str(x))[:40]
+
+
+def _reject(report, what):
+    report["rejected"] = report.get("rejected", 0) + 1
+    lst = report.setdefault("rejected_what", [])
+    if len(lst) < _REJECT_LIST_MAX:
+        lst.append(what)
+
+
+def part_key_ok(k):
+    return isinstance(k, str) and 0 < len(k) <= 80 and not _PART_BAD.search(k)
+
+
+def _id_ok(x):
+    return isinstance(x, (str, int)) and not isinstance(x, bool) and x != ""
+
+
+def status_field_problem(f, v):
+    """None if one kart status field looks like one the app writes (a date, a date code, the weld count), else why not"""
+    if not _STATUS_FIELD.match(str(f)):
+        return f"status field {_label(f)}"
+    if not (_is_num(v) or isinstance(v, str)):
+        return f"status {f} is not text or a number"
+    if isinstance(v, str) and (len(v) > 40 or _MARKUP.search(v)):
+        return f"status {f} is not a date"
+    return None
+
+
+def clean_status(st, prev):
+    """a device's kart status map with every field the app would never write replaced by the server's value for
+    that field (or left out if the server has none): one bad date no longer holds back the kart's other fields,
+    its notes and its stamp. -> (status, [reasons])"""
+    prev = _d(prev)
+    out, why = {}, []
+    for f, v in st.items():
+        p = status_field_problem(f, v)
+        if p is None:
+            out[f] = v
+            continue
+        why.append(p)
+        if f in prev:
+            out[f] = prev[f]
+    return out, why
+
+
+def _date_ok(d):
+    return d is None or (isinstance(d, str) and len(d) <= 32 and not _MARKUP.search(d))
+
+
+def _cfg_ok(c):
+    return (isinstance(c, dict) and (c.get("n") is None or isinstance(c.get("n"), str))
+            and all(c.get(f) is None or _is_num(c.get(f)) for f in ("r", "g", "t"))
+            and (c.get("k") is None or isinstance(c.get("k"), str)))
+
+
+def _quicks_ok(q):
+    return (isinstance(q, list) and len(q) <= 200 and all(
+        isinstance(x, dict) and all(x.get(f) is None or isinstance(x.get(f), str) for f in ("l", "p", "s")) for x in q))
 
 
 # ---- parts strings: "59921 x1, 59926 x2, 60290" ----------------------------------------------------------
@@ -141,16 +225,16 @@ def merge(canonical, incoming, now_ms=None):
         # the very first import: part config and counts that were never "touched" on a device (the seeded
         # catalog) have no stamps and would never merge - the first snapshot seeds them as the base
         for num, cfg in _d(incoming.get("invCfg")).items():
-            if isinstance(cfg, dict) and num not in _d(incoming.get("partTomb")):
+            if isinstance(cfg, dict) and num not in _d(incoming.get("partTomb")) and part_key_ok(num) and _cfg_ok(cfg):
                 db["invCfg"][num] = copy.deepcopy(cfg)
         for num, qty in _d(incoming.get("inv")).items():
-            if num not in _d(incoming.get("partTomb")):
+            if num not in _d(incoming.get("partTomb")) and part_key_ok(num) and _is_num(qty):
                 db["inv"][num] = qty
         # every kart's status is stamped at import: an unstamped kart could otherwise be overwritten by any
         # stale device carrying the smallest stamp (a stamp beats no stamp in the app's rule)
         in_stamps = _d(_d(incoming.get("stamps")).get("karts"))
         for k, v in _d(incoming.get("karts")).items():
-            if isinstance(v, dict) and k not in in_stamps:
+            if isinstance(v, dict) and k not in in_stamps and KART_KEY.match(k):
                 db["stamps"]["karts"][k] = float(now_ms)
     for key, blank in empty_snapshot().items():
         if key not in db or db[key] is None:
@@ -159,7 +243,7 @@ def merge(canonical, incoming, now_ms=None):
     r = incoming or {}
     report = {"entries_added": 0, "entries_removed": 0, "karts_status": 0, "shop_added": 0, "quicks": False,
               "rekeys": 0, "parts_deleted": 0, "cfg_updated": 0, "inv_updated": 0, "bat_added": 0, "bat_updated": 0,
-              "bat_history": 0, "rc_added": 0, "photos_added": 0, "tombs_added": 0}
+              "bat_history": 0, "rc_added": 0, "photos_added": 0, "tombs_added": 0, "rejected": 0}
 
     # tombstones: a union
     for tid, at in _d(r.get("tomb")).items():
@@ -174,11 +258,17 @@ def merge(canonical, incoming, now_ms=None):
     for k, rem in rk.items():
         if not isinstance(rem, dict):
             continue
+        if not KART_KEY.match(k):
+            _reject(report, f"kart key {_label(k)}")
+            continue
         loc = db["karts"].setdefault(k, {"status": {}, "entries": [], "knotes": ""})
         loc.setdefault("entries", [])
         have = {e.get("id") for e in loc["entries"] if e.get("id")}
         for en in _l(rem.get("entries")):
-            if not isinstance(en, dict) or not en.get("id") or en["id"] in have or en["id"] in db["tomb"]:
+            if not isinstance(en, dict) or not _id_ok(en.get("id")) or en["id"] in have or en["id"] in db["tomb"]:
+                continue
+            if not _date_ok(en.get("date")):
+                _reject(report, f"kart {k} entry date")
                 continue
             loc["entries"].append(_clean_entry(en))
             have.add(en["id"])
@@ -189,9 +279,17 @@ def merge(canonical, incoming, now_ms=None):
         rs = _clamp_stamp(rk_stamps.get(k, 0), now_ms, report, f"kart {k}")
         ls = _num(db["stamps"]["karts"].get(k, 0))
         if rs > ls:
-            if rem.get("status"):
-                loc["status"] = rem["status"]
-            loc["knotes"] = rem.get("knotes") or ""
+            st = rem.get("status")
+            if st and not isinstance(st, dict):
+                _reject(report, f"kart {k} status is not a map")     # keep what the server has; entries still merge
+                continue
+            if st:
+                st, why = clean_status(st, loc.get("status"))
+                for w in why:
+                    _reject(report, f"kart {k} {w}")     # that field keeps the server's value; the rest merges
+                loc["status"] = st
+            kn = rem.get("knotes")
+            loc["knotes"] = kn if isinstance(kn, str) else ""
             db["stamps"]["karts"][k] = rs
             report["karts_status"] += 1
     for k, loc in db["karts"].items():
@@ -202,7 +300,10 @@ def merge(canonical, incoming, now_ms=None):
     # shop (non-kart parts use): union minus tombstones
     have_s = {s.get("id") for s in db["shop"] if s.get("id")}
     for se in _l(r.get("shop")):
-        if not isinstance(se, dict) or not se.get("id") or se["id"] in have_s or se["id"] in db["tomb"]:
+        if not isinstance(se, dict) or not _id_ok(se.get("id")) or se["id"] in have_s or se["id"] in db["tomb"]:
+            continue
+        if not _date_ok(se.get("date")):
+            _reject(report, "shop entry date")
             continue
         db["shop"].append({"id": se["id"], "date": se.get("date") or "", "usedFor": se.get("usedFor") or "",
                            "parts": se.get("parts") or "", "mechanic": se.get("mechanic") or ""})
@@ -211,22 +312,30 @@ def merge(canonical, incoming, now_ms=None):
         if len(report.setdefault("added", [])) < 40:
             report["added"].append({"kart": "shop", "date": se.get("date") or "", "action": (se.get("usedFor") or "")[:80],
                                     "mechanic": se.get("mechanic") or "", "parts": (se.get("parts") or "")[:80]})
-        if len(report.setdefault("added", [])) < 40:
-            report["added"].append({"kart": "shop", "date": se.get("date") or "", "action": (se.get("usedFor") or "")[:80],
-                                    "mechanic": se.get("mechanic") or "", "parts": (se.get("parts") or "")[:80]})
     db["shop"] = [s for s in db["shop"] if not (s.get("id") and s["id"] in db["tomb"])]
 
     # quick actions: the newer list wins
     rq = _clamp_stamp(rstamps.get("quicks", 0), now_ms, report, "quicks")
     if _l(r.get("quicks")) and rq > _num(db["stamps"].get("quicks", 0)):
-        db["quicks"] = r["quicks"]
-        db["stamps"]["quicks"] = rq
-        report["quicks"] = True
+        if _quicks_ok(r["quicks"]):
+            db["quicks"] = r["quicks"]
+            db["stamps"]["quicks"] = rq
+            report["quicks"] = True
+        else:
+            _reject(report, "quick actions")
 
     # part identity: renames first (in order), then deletions, then names/thresholds
     mine = {f"{x.get('from')}>{x.get('to')}@{x.get('at')}" for x in db["rekeys"]}
-    todo = [x for x in _l(r.get("rekeys")) if isinstance(x, dict) and x.get("from") and x.get("to")
-            and f"{x.get('from')}>{x.get('to')}@{x.get('at')}" not in mine]
+    todo = []
+    for x in _l(r.get("rekeys")):
+        if not (isinstance(x, dict) and x.get("from") and x.get("to")):
+            continue
+        if f"{x.get('from')}>{x.get('to')}@{x.get('at')}" in mine:
+            continue
+        if not (part_key_ok(x["from"]) and part_key_ok(x["to"])):
+            _reject(report, "part rename " + _label(x.get("from")) + ">" + _label(x.get("to")))
+            continue
+        todo.append(x)
     todo.sort(key=lambda x: _num(x.get("at")))
     for x in todo:
         rekey_part(db, x["from"], x["to"], _num(x.get("at")) or now_ms)
@@ -236,6 +345,9 @@ def merge(canonical, incoming, now_ms=None):
         db["rekeys"] = db["rekeys"][-100:]
     for dnum, at in _d(r.get("partTomb")).items():
         if dnum in db["partTomb"]:
+            continue
+        if not part_key_ok(dnum):
+            _reject(report, f"part delete {_label(dnum)}")
             continue
         if _num(db["cfgTouched"].get(dnum, 0)) > _num(at):
             continue          # edited here after the delete there: the part is wanted back
@@ -248,7 +360,10 @@ def merge(canonical, incoming, now_ms=None):
     for cnum, at in rct.items():
         if cnum in db["partTomb"] or not isinstance(rcfg.get(cnum), dict):
             continue
-        at = _clamp_stamp(at, now_ms, report, f"cfg {cnum}")
+        if not part_key_ok(cnum) or not _cfg_ok(rcfg[cnum]):
+            _reject(report, f"part {_label(cnum)}")
+            continue
+        at = _clamp_stamp(at, now_ms, report, f"cfg {_label(cnum)}")
         if at < _num(db["cfgTouched"].get(cnum, 0)):
             continue
         rc2 = rcfg[cnum]
@@ -280,8 +395,11 @@ def merge(canonical, incoming, now_ms=None):
     for num, at in rit.items():
         if num in db["partTomb"]:
             continue
-        at = _clamp_stamp(at, now_ms, report, f"inv {num}")
+        at = _clamp_stamp(at, now_ms, report, f"inv {_label(num)}")
         if num in rin and at > _num(db["invTouched"].get(num, 0)):
+            if not part_key_ok(num) or not _is_num(rin[num]):
+                _reject(report, f"count {_label(num)}")
+                continue
             db["inv"][num] = rin[num]
             db["invTouched"][num] = at
             if ric.get(num):
@@ -295,6 +413,9 @@ def merge(canonical, incoming, now_ms=None):
     by_sn = {b.get("sn"): bid for bid, b in db["bat"].items() if isinstance(b, dict) and b.get("sn")}
     for bid, rbe in rb.items():
         if not isinstance(rbe, dict) or not rbe.get("sn") or bid in db["tomb"]:
+            continue
+        if not isinstance(rbe.get("sn"), str):
+            _reject(report, f"battery {_label(bid)}")
             continue
         lbe = db["bat"].get(bid)
         if not lbe:
@@ -341,7 +462,7 @@ def merge(canonical, incoming, now_ms=None):
         rh = _l(rbe.get("h"))
         if cur is not None and rh:
             lh = cur.setdefault("h", [])
-            seen = {h.get("t") for h in lh}
+            seen = {h.get("t") for h in lh if isinstance(h, dict)}
             for h in rh:
                 if isinstance(h, dict) and h.get("t") not in seen:
                     lh.append(h)
@@ -359,6 +480,9 @@ def merge(canonical, incoming, now_ms=None):
             report["rc_added"] += 1
     for pid, url in _d(r.get("photos")).items():
         if pid not in db["photos"]:
+            if not (_PHOTO_ID.match(pid) and isinstance(url, str) and _PHOTO_URL.match(url)):
+                _reject(report, f"photo link {_label(pid)}")
+                continue
             db["photos"][pid] = url
             report["photos_added"] += 1
     if r.get("parts"):
@@ -373,8 +497,10 @@ def _bat_row(rbe, keep):
            "date": rbe.get("date") or "", "ini": rbe.get("ini") or "", "c": rbe.get("c") or 0, "at": rbe.get("at") or 0}
     if rbe.get("nf"):
         row["nf"] = 1
-    if isinstance(rbe.get("h"), list):
-        row["h"] = list(rbe["h"])
+    # history: the kept row's events first, then the incoming ones (the app: (keep.h||[]).concat(rbe.h||[]))
+    h = [x for x in _l(keep.get("h")) + _l(rbe.get("h")) if isinstance(x, dict)]
+    if h or isinstance(rbe.get("h"), list):
+        row["h"] = h
     return row
 
 
@@ -394,16 +520,20 @@ def sanity(incoming):
     if incoming.get("app") != "k1kartlog":
         problems.append("not a kart log snapshot")
     if incoming.get("type") not in (None, "snapshot"):
-        problems.append(f"type {incoming.get('type')!r} is not a snapshot")
+        problems.append(f"type {_label(incoming.get('type'))!r} is not a snapshot")
     karts = incoming.get("karts")
     if karts is not None and not isinstance(karts, dict):
         problems.append("karts is not a map")
     if isinstance(karts, dict):
+        bad = [k for k in karts if not KART_KEY.match(k)]
+        if bad:
+            # the app only ever sends its own numbered karts: anything else was not written by the app
+            problems.append(f"{len(bad)} kart key(s) that are not kart numbers, e.g. {_label(bad[0])!r}")
         for k, v in list(karts.items())[:200]:
             if not isinstance(v, dict):
-                problems.append(f"kart {k} is not an object")
+                problems.append(f"kart {_label(k)} is not an object")
                 break
             if v.get("entries") is not None and not isinstance(v.get("entries"), list):
-                problems.append(f"kart {k} entries is not a list")
+                problems.append(f"kart {_label(k)} entries is not a list")
                 break
     return problems

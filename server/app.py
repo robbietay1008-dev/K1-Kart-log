@@ -7,8 +7,17 @@ Two FastAPI apps in one process file:
 Data: one SQLite file (DATA_DIR/kartlog.db). The canonical snapshot is one JSON document merged with every push
 (merge.py = the app's own merge rules); every push is kept verbatim in the audit table; refused pushes go to
 quarantine with the reason. Photos are files under DATA_DIR/photos.
+
+Hardening (2026-09-28 audit, batch 3): every response carries nosniff / no-referrer / frame-deny headers, and the
+two pages (the app and the dashboard) a Content-Security-Policy that lets only their own inline script run (by
+hash) and lets them talk only to this server; request bodies are capped per route (413); a wrong enrolment code
+waits outside the lock and there is a global limit on wrong codes (429); merges, photo writes and enrolment run in
+the worker threads, never on the event loop; invite codes can expire.
 """
+import asyncio
 import base64
+import collections
+import datetime as _dt
 import hashlib
 import json
 import os
@@ -19,7 +28,9 @@ import threading
 import time
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from starlette.datastructures import MutableHeaders
 
 import merge as M
 
@@ -30,6 +41,14 @@ PHOTO_DIR = os.path.join(DATA_DIR, "photos")
 ADMIN_TOKEN = os.environ.get("KARTLOG_ADMIN_TOKEN", "")
 _LOCK = threading.Lock()
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
+
+KB, MB = 1024, 1024 * 1024
+# request body caps per route (the biggest real push so far is ~180 KB; a photo is at most 6 MB of image)
+BODY_CAPS = {"/api/enroll": 64 * KB, "/api/sync": 5 * MB, "/api/photo": 9 * MB, "/api/admin/import": 64 * MB}
+PUBLIC_DEFAULT_CAP, ADMIN_DEFAULT_CAP = 64 * KB, 1 * MB
+ENROLL_WINDOW_S, ENROLL_MAX_FAILS = 600, 20      # at most 20 wrong codes per 10 minutes, all clients together
+INVITE_HOURS_DEFAULT = 48
+BASE_HEADERS = {"X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY"}
 
 
 # ------------------------------------------------------------------------------------------ storage
@@ -72,10 +91,17 @@ def init():
         CREATE TABLE IF NOT EXISTS receipts (id INTEGER PRIMARY KEY AUTOINCREMENT, at REAL, line_id INTEGER, order_id TEXT,
                                              part TEXT, qty INTEGER, before REAL, after REAL, version INTEGER);
         """)
-        for table in ("invites", "devices"):
+        # columns added after the first release; both processes start together, so the second one to try an
+        # ALTER may find it already done
+        for table, col, decl in (("invites", "mechanic", "TEXT DEFAULT ''"), ("devices", "mechanic", "TEXT DEFAULT ''"),
+                                 ("invites", "expires_at", "REAL")):
             cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
-            if "mechanic" not in cols:
-                c.execute(f"ALTER TABLE {table} ADD COLUMN mechanic TEXT DEFAULT ''")
+            if col not in cols:
+                try:
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+                except sqlite3.OperationalError as e:
+                    if "duplicate column" not in str(e).lower():
+                        raise
 
 
 def setting(key, default=None):
@@ -119,32 +145,144 @@ def current_build():
         return "dev"
 
 
-def apply_push(payload, device, build):
-    """merge a device's snapshot into the canonical copy; returns (ok, response dict)"""
-    problems = M.sanity(payload)
+def apply_push(payload, device, build, check=True):
+    """merge a device's snapshot into the canonical copy; returns (ok, response dict). Blocking: called through
+    run_in_threadpool, never on the event loop. check=False is the owner's "merge anyway" on a quarantined push:
+    sanity() is skipped (merge() still refuses bad kart keys, status fields, dates... one by one, counted in the
+    push's report) and a refusal never adds another quarantine row"""
+    problems = M.sanity(payload) if check else ([] if isinstance(payload, dict) else ["not an object"])
     now = int(time.time() * 1000)
     with _LOCK:
         if problems:
-            with db() as c:
-                c.execute("INSERT INTO quarantine(at, device, build, reason, raw) VALUES(?, ?, ?, ?, ?)",
-                          (time.time(), device, build, "; ".join(problems), json.dumps(payload)[:4_000_000]))
-            return False, {"ok": False, "quarantined": True, "reason": "; ".join(problems)}
+            if check:
+                with db() as c:
+                    c.execute("INSERT INTO quarantine(at, device, build, reason, raw) VALUES(?, ?, ?, ?, ?)",
+                              (time.time(), device, build, "; ".join(problems), json.dumps(payload)[:4_000_000]))
+            return False, {"ok": False, "quarantined": check, "reason": "; ".join(problems)}
         canon, version, _ = load_snapshot()
         merged, report = M.merge(canon, payload, now)
         version += 1
         store_snapshot(merged, version, device)
         with db() as c:
             c.execute("INSERT INTO audit(at, device, build, bytes, saved_at, report, version_after, raw) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-                      (time.time(), device, build, len(json.dumps(payload)), payload.get("savedAt") or "", json.dumps(report), version,
+                      (time.time(), device, build, len(json.dumps(payload)), str(payload.get("savedAt") or "")[:40], json.dumps(report), version,
                        json.dumps(payload, separators=(",", ":"))[:4_000_000]))
             c.execute("UPDATE devices SET last_seen=?, build=?, pushes=pushes+1 WHERE token=?", (time.time(), build, device))
             c.execute("DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 400)")
-    changed = {k: v for k, v in report.items() if v}
+    changed = {k: v for k, v in report.items() if v and k != "rejected_what"}
     return True, {"ok": True, "version": version, "changes": changed, "counts": M.counts(merged)}
 
 
+# ------------------------------------------------------------------------------------------ HTTP hardening
+_SCRIPT_RE = re.compile(r"<script(?:\s[^>]*)?>(.*?)</script\s*>", re.S | re.I)
+
+
+def page_csp(html):
+    """Content-Security-Policy for one of our two pages. Only the page's own inline <script> blocks may run
+    (matched by hash), so markup that slips into innerHTML can never execute; the page may only talk to this
+    server (connect-src 'self'), and no other site may frame it."""
+    hashes = []
+    for m in _SCRIPT_RE.finditer(html):
+        # the browser hashes the script text after the HTML parser has turned CRLF / CR into LF
+        body = m.group(1).replace("\r\n", "\n").replace("\r", "\n")
+        hashes.append("'sha256-" + base64.b64encode(hashlib.sha256(body.encode("utf-8")).digest()).decode() + "'")
+    # 'unsafe-inline' is only for browsers too old to know hashes (CSP level 1, e.g. an iPad on iOS 9): every
+    # browser that understands a hash ignores 'unsafe-inline' when one is present, so there nothing but the
+    # page's own script runs (inline on...= handlers included); the old ones keep working instead of going blank
+    return ("default-src 'self'; script-src 'self' 'unsafe-inline' " + " ".join(hashes) + "; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; media-src 'self' blob:; object-src 'none'; "
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; manifest-src 'self'; worker-src 'self'")
+
+
+async def _too_large(send, cap):
+    body = json.dumps({"detail": f"request too large (limit {cap // KB} KB)"}).encode()
+    await send({"type": "http.response.start", "status": 413,
+                "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode()),
+                            (b"connection", b"close")]})
+    await send({"type": "http.response.body", "body": body})
+
+
+class Guard:
+    """ASGI middleware: the basic security headers on every response, and a per-route cap on request bodies
+    (413 before the body is read when Content-Length says it is too big; a chunked body is read here up to the cap
+    and then handed on)"""
+
+    def __init__(self, app, default_cap):
+        self.app, self.default_cap = app, default_cap
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_h(msg):
+            if msg["type"] == "http.response.start":
+                h = MutableHeaders(scope=msg)
+                for k, v in BASE_HEADERS.items():
+                    if k not in h:
+                        h[k] = v
+            await send(msg)
+
+        cap = BODY_CAPS.get(scope.get("path", ""), self.default_cap)
+        clen = None
+        for k, v in scope.get("headers") or []:
+            if k == b"content-length":
+                try:
+                    clen = int(v)
+                except ValueError:
+                    clen = -1
+        if clen is not None and (clen < 0 or clen > cap):
+            await _too_large(send_h, cap)
+            return
+        if clen is None and scope.get("method") in ("POST", "PUT", "PATCH", "DELETE"):
+            chunks, size = [], 0
+            while True:
+                msg = await receive()
+                if msg["type"] == "http.disconnect":
+                    return
+                part = msg.get("body", b"")
+                size += len(part)
+                if size > cap:
+                    await _too_large(send_h, cap)
+                    return
+                chunks.append(part)
+                if not msg.get("more_body"):
+                    break
+            buf, done = b"".join(chunks), False
+
+            async def replay():
+                nonlocal done
+                if not done:
+                    done = True
+                    return {"type": "http.request", "body": buf, "more_body": False}
+                return await receive()
+
+            await self.app(scope, replay, send_h)
+            return
+        await self.app(scope, receive, send_h)
+
+
+async def _json_body(request):
+    """the request body as JSON, parsed in a worker thread (a push can be a few MB)"""
+    raw = await request.body()
+    try:
+        return await run_in_threadpool(json.loads, raw)
+    except Exception:
+        raise HTTPException(400, "bad json")
+
+
+def _local(ts=None):
+    """shop time (America/Chicago), whatever the container's TZ is"""
+    try:
+        from zoneinfo import ZoneInfo
+        return _dt.datetime.fromtimestamp(time.time() if ts is None else ts, ZoneInfo(ORDER_TZ))
+    except Exception:
+        return _dt.datetime.fromtimestamp(time.time() if ts is None else ts)
+
+
 # ------------------------------------------------------------------------------------------ public app
-public = FastAPI(title="K1 Kart Log", docs_url=None, redoc_url=None)
+public = FastAPI(title="K1 Kart Log", docs_url=None, redoc_url=None, openapi_url=None)
+public.add_middleware(Guard, default_cap=PUBLIC_DEFAULT_CAP)
 shared = APIRouter()
 
 
@@ -168,24 +306,54 @@ def api_version(x_app_build: str = Header(None)):
     return {"build": current_build(), "minBuild": setting("min_build", ""), "mustUpdate": must_update(x_app_build or "")}
 
 
-@shared.post("/api/enroll")
-async def api_enroll(request: Request):
-    body = await request.json()
-    code = str(body.get("code") or "").strip().upper()
-    label = str(body.get("label") or "")[:60]
-    if not code:
-        raise HTTPException(400, "code required")
+_enroll_fails = collections.deque()      # monotonic times of recent wrong codes (event-loop thread only)
+_enroll_inflight = 0
+
+
+def _enroll_in_db(code, label):
+    """the enrolment itself (worker thread): the new device, or None when the code is not valid"""
+    now = time.time()
     with _LOCK, db() as c:
         inv = c.execute("SELECT * FROM invites WHERE code=?", (code,)).fetchone()
-        if not inv or inv["revoked"] or (inv["max_uses"] and inv["uses"] >= inv["max_uses"]):
-            time.sleep(0.8)   # slow down guessing
-            raise HTTPException(403, "that code is not valid")
+        if (not inv or inv["revoked"] or (inv["max_uses"] and inv["uses"] >= inv["max_uses"])
+                or (inv["expires_at"] and inv["expires_at"] < now)):
+            return None
         token = secrets.token_urlsafe(32)
         mech = (inv["mechanic"] or "").upper()
         c.execute("INSERT INTO devices(token, label, created_at, last_seen, invite, mechanic) VALUES(?, ?, ?, ?, ?, ?)",
-                  (token, label or inv["label"] or code, time.time(), time.time(), code, mech))
+                  (token, label or inv["label"] or code, now, now, code, mech))
         c.execute("UPDATE invites SET uses=uses+1 WHERE code=?", (code,))
     return {"ok": True, "token": token, "label": label or inv["label"] or code, "mechanic": mech}
+
+
+@shared.post("/api/enroll")
+async def api_enroll(request: Request):
+    global _enroll_inflight
+    body = await _json_body(request)
+    if not isinstance(body, dict):
+        raise HTTPException(400, "bad json")
+    code = str(body.get("code") or "").strip().upper()[:40]
+    label = str(body.get("label") or "")[:60]
+    if not code:
+        raise HTTPException(400, "code required")
+    # a global limit on wrong codes (a forwarded-for address can not be trusted to tell clients apart); attempts
+    # still being checked count too, so a burst can not slip past it. No await between the check and the count.
+    now = time.monotonic()
+    while _enroll_fails and now - _enroll_fails[0] > ENROLL_WINDOW_S:
+        _enroll_fails.popleft()
+    if len(_enroll_fails) + _enroll_inflight >= ENROLL_MAX_FAILS:
+        wait = int(ENROLL_WINDOW_S - (now - _enroll_fails[0])) + 1 if _enroll_fails else 60
+        raise HTTPException(429, f"too many wrong codes - try again in {wait // 60 + 1} min", headers={"Retry-After": str(wait)})
+    _enroll_inflight += 1
+    try:
+        got = await run_in_threadpool(_enroll_in_db, code, label)
+    finally:
+        _enroll_inflight -= 1
+    if not got:
+        _enroll_fails.append(time.monotonic())
+        await asyncio.sleep(0.8)   # slow down guessing - outside the lock, holding neither a thread nor the event loop
+        raise HTTPException(403, "that code is not valid")
+    return got
 
 
 @shared.get("/api/snapshot")
@@ -208,18 +376,14 @@ def api_snapshot(dev=Depends(device_auth)):
 async def api_sync(request: Request, dev=Depends(device_auth)):
     if must_update(dev["build"]):
         return JSONResponse({"ok": False, "mustUpdate": True, "build": current_build()}, status_code=426)
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(400, "bad json")
-    ok, resp = apply_push(payload, dev["token"], dev["build"])
+    payload = await _json_body(request)
+    ok, resp = await run_in_threadpool(apply_push, payload, dev["token"], dev["build"])
     resp["build"] = current_build()
     return resp
 
 
-@shared.post("/api/photo")
-async def api_photo(request: Request, dev=Depends(device_auth)):
-    body = await request.json()
+def _store_photo(body, device):
+    """decode and store one photo (worker thread)"""
     pid = str(body.get("id") or "")
     data_url = str(body.get("dataURL") or "")
     if not _SAFE.match(pid) or not data_url.startswith("data:image/"):
@@ -227,7 +391,10 @@ async def api_photo(request: Request, dev=Depends(device_auth)):
     m = re.match(r"^data:image/(jpeg|jpg|png|webp);base64,(.+)$", data_url, re.S)
     if not m:
         raise HTTPException(400, "unsupported image")
-    raw = base64.b64decode(m.group(2))
+    try:
+        raw = base64.b64decode(m.group(2))
+    except Exception:
+        raise HTTPException(400, "bad image data")
     if len(raw) > 6_000_000:
         raise HTTPException(413, "photo too large")
     ext = "jpg" if m.group(1) in ("jpeg", "jpg") else m.group(1)
@@ -238,12 +405,20 @@ async def api_photo(request: Request, dev=Depends(device_auth)):
         with db() as c:      # one connection at a time: a nested connection would wait on this one's write lock
             c.execute("INSERT INTO photos(id, kart, date, device, at, path, bytes) VALUES(?, ?, ?, ?, ?, ?, ?) "
                       "ON CONFLICT(id) DO UPDATE SET path=excluded.path, bytes=excluded.bytes",
-                      (pid, str(body.get("kart") or ""), str(body.get("date") or ""), dev["token"], time.time(), path, len(raw)))
+                      (pid, str(body.get("kart") or "")[:10], str(body.get("date") or "")[:32], device, time.time(), path, len(raw)))
         snap, version, _ = load_snapshot()
         if snap is not None:
             snap.setdefault("photos", {})[pid] = f"/api/photo/{pid}"
-            store_snapshot(snap, version + 1, dev["token"])
+            store_snapshot(snap, version + 1, device)
     return {"ok": True, "url": f"/api/photo/{pid}"}
+
+
+@shared.post("/api/photo")
+async def api_photo(request: Request, dev=Depends(device_auth)):
+    body = await _json_body(request)
+    if not isinstance(body, dict):
+        raise HTTPException(400, "bad photo")
+    return await run_in_threadpool(_store_photo, body, dev["token"])
 
 
 @shared.get("/api/photo/{pid}")
@@ -280,7 +455,7 @@ def _page(request):
     html = open(p, encoding="utf-8").read()
     if request.app is admin:
         html = html.replace("/*__ADMIN__*/false", "true", 1)
-    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache", "Content-Security-Policy": page_csp(html)})
 
 
 @shared.get("/", response_class=HTMLResponse)
@@ -311,7 +486,8 @@ def app_icon(size: str):
 
 
 # ------------------------------------------------------------------------------------------ admin app
-admin = FastAPI(title="K1 Kart Log admin", docs_url=None, redoc_url=None)
+admin = FastAPI(title="K1 Kart Log admin", docs_url=None, redoc_url=None, openapi_url=None)
+admin.add_middleware(Guard, default_cap=ADMIN_DEFAULT_CAP)
 
 
 def admin_auth(authorization: str = Header(None)):
@@ -326,7 +502,8 @@ def admin_auth(authorization: str = Header(None)):
 @admin.get("/dashboard", response_class=HTMLResponse)
 def admin_dashboard():
     p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "admin.html")
-    return HTMLResponse(open(p, encoding="utf-8").read())
+    html = open(p, encoding="utf-8").read()
+    return HTMLResponse(html, headers={"Content-Security-Policy": page_csp(html)})
 
 
 @admin.post("/api/admin/self-enroll")
@@ -356,11 +533,12 @@ def adm_activity(limit: int = 40, _=Depends(admin_auth)):
             rep = json.loads(r["report"])
         except Exception:
             rep = {}
-        changed = {k: v for k, v in rep.items() if v and k not in ("added", "future_stamps")}
+        changed = {k: v for k, v in rep.items() if v and k not in ("added", "future_stamps", "rejected_what")}
         events.append({"at": r["at"], "device": labels.get(r["device"], r["device"] if str(r["device"] or "").startswith("admin-") else "unknown device"),
                        "build": r["build"], "added": rep.get("added") or [], "changed": changed})
     snap, _v, _u = load_snapshot()
-    today = time.strftime("%-m/%-d/%Y") if os.name != "nt" else time.strftime("%#m/%#d/%Y")
+    d = _local()                              # the shop's today, not the container's (UTC) one
+    today = f"{d.month}/{d.day}/{d.year}"
     by_mech = {}
     if snap:
         for k, v in (snap.get("karts") or {}).items():
@@ -399,9 +577,11 @@ async def adm_import(request: Request, _=Depends(admin_auth)):
         payload = json.loads(m.group(1) if m else raw)
     except Exception:
         raise HTTPException(400, "not json")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "not a snapshot")
     payload.setdefault("app", "k1kartlog")
     payload.setdefault("type", "snapshot")
-    ok, resp = apply_push(payload, "admin-import", payload.get("appBuild") or "import")
+    ok, resp = await run_in_threadpool(apply_push, payload, "admin-import", str(payload.get("appBuild") or "import")[:20])
     return resp
 
 
@@ -446,10 +626,15 @@ async def adm_invite_new(request: Request, _=Depends(admin_auth)):
     body = await request.json()
     code = "".join(secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
     mech = str(body.get("mechanic") or "").strip().upper()[:30]
+    try:
+        hours = float(body.get("hours", INVITE_HOURS_DEFAULT))
+    except (TypeError, ValueError):
+        hours = INVITE_HOURS_DEFAULT
+    expires = time.time() + hours * 3600 if hours > 0 else None      # 0 = never expires
     with db() as c:
-        c.execute("INSERT INTO invites(code, label, created_at, max_uses, mechanic) VALUES(?, ?, ?, ?, ?)",
-                  (code, str(body.get("label") or "")[:60], time.time(), int(body.get("max_uses") or 1), mech))
-    return {"ok": True, "code": code, "mechanic": mech}
+        c.execute("INSERT INTO invites(code, label, created_at, max_uses, mechanic, expires_at) VALUES(?, ?, ?, ?, ?, ?)",
+                  (code, str(body.get("label") or "")[:60], time.time(), int(body.get("max_uses") or 1), mech, expires))
+    return {"ok": True, "code": code, "mechanic": mech, "expires_at": expires}
 
 
 @admin.post("/api/admin/invites/revoke")
@@ -498,9 +683,14 @@ def adm_quarantine_act(qid: int, action: str, _=Depends(admin_auth)):
     if not r:
         raise HTTPException(404)
     if action == "apply":
-        payload = json.loads(r["raw"])
+        try:
+            payload = json.loads(r["raw"])
+        except ValueError:
+            return {"ok": False, "reason": "the stored copy is incomplete (cut at 4 MB) - it cannot be merged"}
+        if not isinstance(payload, dict):
+            return {"ok": False, "reason": "not an object"}
         payload["app"] = "k1kartlog"; payload["type"] = "snapshot"
-        ok, resp = apply_push(payload, r["device"], r["build"])
+        ok, resp = apply_push(payload, r["device"], r["build"], check=False)   # the owner's override: no re-quarantine
         if not ok:
             return resp
     elif action != "dismiss":
@@ -706,7 +896,7 @@ def adm_order_text(oid: str, _=Depends(admin_auth)):
         if not o:
             raise HTTPException(404, "no such order")
         lines = c.execute("SELECT part, name, ordered, booked FROM order_lines WHERE order_id=? ORDER BY id", (oid,)).fetchall()
-    when = time.strftime("%m/%d/%Y", time.localtime(o["at"]))
+    when = _local(o["at"]).strftime("%m/%d/%Y")
     txt = [f"K1 Arlington parts order {o['id']}  ({when})" + (f"  {o['note']}" if o["note"] else ""), ""]
     for ln in lines:
         txt.append(f"{ln['part']:<12} x{ln['ordered']:<5} {ln['name']}")

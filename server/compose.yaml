@@ -5,8 +5,17 @@ services:
     restart: unless-stopped
     environment:
       KARTLOG_ADMIN_TOKEN: ${KARTLOG_ADMIN_TOKEN:?set in .env}
+      TZ: America/Chicago        # shop time: WATCH "today", order dates, log times
     volumes:
       - /main/homelab/kartlog/data:/data
     ports:
       - "127.0.0.1:8090:8090"   # public app  -> tailscale funnel
       - "127.0.0.1:8091:8091"   # admin       -> tailscale serve (tailnet only)
+    mem_limit: 1g                # normal use is ~135 MB; a flood of requests can not take the host's memory
+    pids_limit: 256
+    healthcheck:                 # both apps must answer (no curl in the image, so python's urllib)
+      test: ["CMD", "python", "-c", "import urllib.request as u; [u.urlopen('http://127.0.0.1:%d/healthz' % p, timeout=5).read() for p in (8090, 8091)]"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s

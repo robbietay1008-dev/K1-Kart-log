@@ -762,7 +762,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0927-1800";
+var APP_BUILD = "0928-1929";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -1907,7 +1907,7 @@ function renderKart(){
       var d = document.createElement("button");
       d.className = "schip" + svcClass(st[f]);
       d.style.border = "1px solid #384060"; d.style.background="#242938"; d.style.color="#fff";
-      d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>";
+      d.innerHTML = "<b>"+label+"</b><span>"+esc(st[f]||"—")+"</span>";
       d.onclick = function(){ editDateField(f, label); };
       row.appendChild(d);
     })(SVC_FIELDS[i][0], SVC_FIELDS[i][1]);
@@ -1921,7 +1921,7 @@ function renderKart(){
       d.className = "schip";
       d.style.border = "1px solid #384060"; d.style.background="#242938"; d.style.color="#fff";
       var snp = batAtPos(currentKart, j+1);
-      d.innerHTML = "<b>"+label+"</b><span>"+(st[f]||"—")+"</span>" +
+      d.innerHTML = "<b>"+label+"</b><span>"+esc(st[f]||"—")+"</span>" +
         '<small style="display:block; font-size:11px; color:' + (snp ? '#c9d2e3' : '#667') + '; letter-spacing:.5px">' + (snp ? esc(snp) : 'no serial') + '</small>';
       d.onclick = function(){ openSlotModal(f, j+1, label); };
       brow.appendChild(d);
@@ -1962,7 +1962,7 @@ function renderKart(){
       div.className = "entry";
       var h = '<button class="delx">&#10005;</button>' +
         '<button class="camx">&#128247;+</button>' +
-        '<div class="edate">'+en.date+'</div>' +
+        '<div class="edate">'+esc(en.date)+'</div>' +
         '<div class="eaction">'+esc(en.action)+'</div>';
       if (en.parts) h += '<div class="eparts">&#128295; '+esc(en.parts)+'</div>';
       if (en.mechanic) h += '<div class="emech">by '+esc(en.mechanic)+'</div>';
@@ -1989,7 +1989,14 @@ function renderKart(){
   }
 }
 function esc(s){
-  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  /* device-supplied text goes into innerHTML: escape what can open a tag or end an attribute value */
+  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+/* a link that came from another device: only the server's own photo route or an https address may be
+   opened, never javascript: or data: */
+function safeLink(u){
+  u = (typeof u === "string") ? u.trim() : "";
+  return (u.indexOf("/api/photo/") === 0 || /^https:\/\//i.test(u)) ? u : "";
 }
 function editDateField(f, label){
   var st = DB.karts[currentKart].status;
@@ -2080,7 +2087,7 @@ function renderEntryPhotos(en, rowEl){
           b.style.fontSize = "24px";
           b.innerHTML = "&#128247;";
           b.onclick = function(){
-            var u = DB.meta.photoUrls[pid];
+            var u = safeLink(DB.meta.photoUrls[pid]);
             if (u) window.open(u, "_blank");
             else toast("Photo is on another device / not synced yet", true);
           };
@@ -2146,7 +2153,7 @@ function openViewer(pid, en){
   viewerPid = pid; viewerEntry = en;
   photoGet(pid, function(dataURL){
     if (!dataURL){
-      var u = DB.meta.photoUrls[pid];
+      var u = safeLink(DB.meta.photoUrls[pid]);
       if (u) window.open(u, "_blank");
       else toast("Photo not on this device yet", true);
       return;
@@ -2303,7 +2310,7 @@ function renderInv(){
       div.innerHTML = th + '<span class="pn">'+esc(num)+'</span><span class="pd">'+esc(c.n)+
         fitsTag(c.k || "") +
         (done ? ' <span style="color:#4caf7a;font-weight:800">&#10003; counted</span>' : '')+'</span>' +
-        '<span class="qbadge '+(done ? "q-green" : "q-grey")+'">'+(DB.inv[num]!==undefined?DB.inv[num]:"?")+'</span>';
+        '<span class="qbadge '+(done ? "q-green" : "q-grey")+'">'+esc(DB.inv[num]!==undefined?DB.inv[num]:"?")+'</span>';
       div.onclick = function(){ openInvModal(num); };
       el.appendChild(div);
     })(num, c, done);
@@ -2705,7 +2712,7 @@ function scRender(){
     var d = document.createElement("div");
     d.className = "partitem";
     if (sc && sc.num === num) d.style.borderColor = "#e8303a";
-    d.innerHTML = '<span class="pn">' + esc(num) + '</span><span class="pd">' + esc(c ? c.n : "") + '</span><span class="qbadge q-grey">' + old + ' \u2192 <b style="color:#fff">' + t[num] + '</b></span>';
+    d.innerHTML = '<span class="pn">' + esc(num) + '</span><span class="pd">' + esc(c ? c.n : "") + '</span><span class="qbadge q-grey">' + esc(old) + ' \u2192 <b style="color:#fff">' + esc(t[num]) + '</b></span>';
     d.onclick = function(){ sc = { num: num, typed: false }; scRender(); scFocus(); };
     el.appendChild(d);
   });
@@ -3108,7 +3115,7 @@ function renderShop(){
       var div = document.createElement("div");
       div.className = "entry";
       div.innerHTML = '<button class="delx">&#10005;</button>' +
-        '<div class="edate">'+en.date+'</div>' +
+        '<div class="edate">'+esc(en.date)+'</div>' +
         '<div class="eaction">'+esc(en.usedFor)+'</div>' +
         (en.parts ? '<div class="eparts">&#128295; '+esc(en.parts)+'</div>' : '') +
         (en.mechanic ? '<div class="emech">by '+esc(en.mechanic)+'</div>' : '');
