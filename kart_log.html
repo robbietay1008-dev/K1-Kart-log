@@ -196,6 +196,21 @@
   .exportcard p { font-size:14px; color:#9aa3b5; line-height:1.5; margin-bottom:12px; }
   .exportcard .hbtn { width:100%; margin-bottom:10px; font-size:17px; }
   #importArea { margin-top:8px; }
+  /* ---------- barcode labels (owner's edition) ---------- */
+  .lblcard { background:#fff; color:#000; border-radius:12px; padding:12px 8px; margin-top:10px; text-align:center; overflow-x:auto; }
+  .lblcard svg { display:block; margin:0 auto; }
+  .lblnum { font-size:20px; font-weight:800; margin-top:8px; letter-spacing:.5px; word-break:break-all; }
+  .lblnum .lblqty { margin-left:10px; }
+  .lblname { font-size:14px; line-height:1.3; max-height:2.6em; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; word-break:break-word; margin-top:2px; }
+  #lblPrint { display:none; }
+  #lblPrint .lblpg { position:relative; overflow:hidden; background:#fff; color:#000; }
+  #lblPrint .lblpg + .lblpg { page-break-before:always; break-before:page; }
+  @media print {
+    /* only while PRINT LABELS is printing (lblPrint / lblDisarm): the labels and nothing else */
+    html.lblprinting, html.lblprinting body { background:#fff !important; height:auto !important; min-height:0 !important; margin:0 !important; padding:0 !important; }
+    html.lblprinting body > * { display:none !important; }
+    html.lblprinting body > #lblPrint { display:block !important; }
+  }
 </style>
 </head>
 <body>
@@ -256,6 +271,7 @@
     <p style="color:#9aa3b5; font-size:13px; margin-top:10px; text-align:center" id="invThresh"></p>
     <div style="text-align:center; margin-top:8px">
       <button class="hbtn" id="btnInvEdit" style="min-height:40px; padding:8px 16px; font-size:14px">EDIT DETAILS</button>
+      <button class="hbtn" id="btnInvLbl" style="display:none; min-height:40px; padding:8px 16px; font-size:14px; margin-left:8px">BARCODE / LABELS</button>
     </div>
     <div id="invEditWrap" style="display:none; margin-top:12px; border-top:1px solid #2a3142; padding-top:12px">
       <label class="f">PART NAME</label>
@@ -279,6 +295,51 @@
         <button class="hbtn" id="btnInvDelete" style="flex:1; color:#ff8a80; border-color:#7a2a2a">DELETE PART</button>
         <button class="hbtn red" id="btnInvEditSave" style="flex:1">SAVE DETAILS</button>
       </div>
+    </div>
+    <!-- barcode + labels for this part: owner's edition only (lblOn), filled by lblRender -->
+    <div id="invLblWrap" style="display:none; margin-top:12px; border-top:1px solid #2a3142; padding-top:12px">
+      <label class="f" style="margin-top:0">ONE SCAN OF THE LABEL COUNTS AS</label>
+      <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:6px">
+        <div class="chiprow" id="lblQtyRow" style="margin-top:0"></div>
+        <input type="number" class="in" id="lblCustom" inputmode="numeric" min="1" max="9999" placeholder="other &#215;" style="width:112px; min-height:44px; padding:8px 12px; font-size:15px; border-radius:22px">
+      </div>
+      <div class="lblcard" id="lblCard"></div>
+      <p id="lblInfo" style="color:#9aa3b5; font-size:12px; margin-top:6px; text-align:center"></p>
+      <p id="lblWarn" style="display:none; color:#ffc857; font-size:13px; margin-top:6px; line-height:1.4"></p>
+      <label class="f">LAYOUT</label>
+      <select class="in" id="lblLayout">
+        <option value="pt24">Brother P-touch - 24 mm tape x 55 mm</option>
+        <option value="roll">Label printer - one label per page</option>
+        <option value="a5160">Letter sheet - 30 labels (Avery 5160, 1 x 2-5/8 in)</option>
+      </select>
+      <div id="lblSizeWrap" style="display:none; gap:10px; margin-top:8px">
+        <select class="in" id="lblSize" style="flex:2">
+          <option value="s225">2.25 x 1.25 in</option>
+          <option value="s2x1">2 x 1 in</option>
+          <option value="s3x2">3 x 2 in</option>
+          <option value="s4x6">4 x 6 in</option>
+        </select>
+        <select class="in" id="lblDpi" style="flex:1">
+          <option value="203">203 dpi</option>
+          <option value="300">300 dpi</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:10px">
+        <span style="flex:1">
+          <label class="f">COPIES</label>
+          <input type="number" class="in" id="lblCopies" inputmode="numeric" min="1" max="100" value="1">
+        </span>
+        <span style="flex:1; display:none" id="lblStartWrap">
+          <label class="f">START AT LABEL #</label>
+          <input type="number" class="in" id="lblStart" inputmode="numeric" min="1" max="30" value="1">
+        </span>
+      </div>
+      <p id="lblHint" style="color:#9aa3b5; font-size:12px; margin-top:8px; line-height:1.4"></p>
+      <div style="display:flex; gap:10px; margin-top:10px">
+        <button class="hbtn red" id="btnLblPrint" style="flex:1">PRINT LABELS</button>
+        <button class="hbtn" id="btnLblImg" style="flex:1">SAVE LABEL IMAGE</button>
+      </div>
+      <div id="lblImgWrap" style="display:none; margin-top:10px; text-align:center"></div>
     </div>
     <div class="mactions">
       <button class="hbtn" id="btnInvCancel">Cancel</button>
@@ -643,6 +704,7 @@
     <input type="search" class="in" id="fPartSearch" placeholder="Type: chain, tire, 59687 ...">
     <div class="partresults" id="partResults"></div>
     <div class="selparts" id="selParts"></div>
+    <button class="hbtn" id="btnScanned" style="display:none; width:100%; margin-top:8px; border-color:#1d7a3e; color:#7fe0a4">+ SCANNED PARTS</button>
 
     <label class="f">MECHANIC</label>
     <div class="chiprow" id="mechRow"></div>
@@ -667,6 +729,8 @@
 </div>
 
 <div class="toast" id="toast"></div>
+<!-- PRINT LABELS fills this right before window.print(); while it prints it is the only thing on the page -->
+<div id="lblPrint"></div>
 
 <!-- full screen photo viewer -->
 <div id="pviewer">
@@ -762,7 +826,7 @@ var DEFAULT_QUICKS = [
 var SCOPE_LABEL = { all: "ALL KARTS", adult: "ADULT 1-40", jr: "JUNIOR 41-53" };
 
 var LS_KEY = "k1kartlog_v1";
-var APP_BUILD = "0928-1929";
+var APP_BUILD = "0930-1700";
 var DEFAULT_SYNC_URL = "https://script.google.com/macros/s/AKfycbyw5Z3C_4yPn-MbUPLJkxrYPzNYwDkdbf7jQhmAToo7rZPuo3tgUcmWvELmcRpHUel_/exec";
 var DB = null;
 
@@ -2365,14 +2429,32 @@ document.addEventListener("keydown", function(ev){
       }
       scanCommand(code); return;
     }
-    /* a part number scanned with nothing open = pulled off the shelf */
-    if (burst.length >= 4 && !anyModalOpen() && $("scrHome").className.indexOf("active") > -1){
-      var pq = scParseQty(burst), num = scMatchPart(pq.raw);
-      if (num) pullPart(num, pq.qty);
-      else toast("Not a part number: " + burst, true);
-    }
+    /* a part scan works from any screen (it used to count only on the home screen with nothing open, and was
+       dropped without a word anywhere else): log form open -> onto PARTS USED; otherwise -> pulled off the shelf */
+    if (burst.length >= 4) scanPartAnywhere(burst);
   }, 200);
 }, true);
+/* where a scanned part goes */
+function scanPartAnywhere(burst){
+  if ($("scanCountModal").className.indexOf("open") > -1) return;           /* count mode has its own scan box */
+  var ae = document.activeElement, box = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA") ? ae : null;
+  var logOpen = $("logModal").className.indexOf("open") > -1;
+  /* typing in a box: leave it alone - except the log form's part search, where a scan means "this part" */
+  if (box && !(logOpen && box.id === "fPartSearch")) return;
+  var pq = scParseQty(burst), num = scMatchPart(pq.raw);
+  if (!num){ if (!box) toast("Not a part number: " + burst, true); return; }
+  if (box){ var v = String(box.value), i = v.lastIndexOf(burst); if (i > -1) box.value = v.slice(0, i) + v.slice(i + burst.length); $("partResults").innerHTML = ""; }
+  var other = $("pulledModal").className.indexOf("open") > -1 || $("claimModal").className.indexOf("open") > -1;
+  if (logOpen && !other){ scanToForm(num, pq.qty); return; }
+  if (anyModalOpen()){ toast("Close this popup first, then scan " + num + " again", true); return; }
+  pullPart(num, pq.qty);
+}
+function scanToForm(num, qty){
+  var i, c = DB.invCfg[num], p = partRow(num);
+  for (i=0;i<selectedParts.length;i++) if (selectedParts[i].num.toUpperCase() === num.toUpperCase()){ selectedParts[i].qty += qty; renderSelParts(); toast(num + "  +" + qty + " \u2192 \u00d7" + selectedParts[i].qty + " on parts used"); return; }
+  selectedParts.push({ num: num, desc: (c && c.n) ? c.n : (p ? pname(p) : ""), qty: qty });
+  renderSelParts(); toast(num + "  +" + qty + " added to parts used");
+}
 function scanCommand(code){
   var m;
   if (code === "K1-COUNT"){ $("btnInv").click(); openScanCount(); return; }
@@ -2496,14 +2578,16 @@ function reconcilePulls(partsStr, mech){
    no-badge scans so the boss can see how often it happens. */
 var PULL_ORPHAN_TAG = "PULLED (no badge)";
 function pendParts(){ return DB.meta.pendParts || ""; }
+function pendHoldUntil(){ var d = new Date(); d.setHours(23, 59, 0, 0); return d.getTime(); }
+function pullLeftTxt(s){ return s > 300 ? "till tonight" : s + "s"; }
 function pendAdd(num, qty){
   qty = qty || 1;
   DB.meta.pendParts = partsAdd(pendParts(), num, qty);
-  DB.meta.pendUntil = Date.now() + PULL_WINDOW;
+  DB.meta.pendUntil = deviceMech() ? Date.now() + PULL_WINDOW : pendHoldUntil();   /* shared device: hold till tonight */
   if (DB.inv[num] !== undefined){ DB.inv[num] = Math.max(0, DB.inv[num] - qty); DB.invTouched[num] = Date.now(); }
   lastPull = { num: num, mech: "", pend: true, qty: qty };
   save(); renderPullBar();
-  toast("No badge \u2014 holding " + num + ". Scan your badge to claim it.", true);
+  toast(deviceMech() ? "No badge \u2014 holding " + num + ". Scan your badge to claim it." : "Scanned " + num + " \u2014 load it when you log the work (+ SCANNED PARTS), or scan your badge", !!deviceMech());
 }
 function pendOrphan(){
   var parts = pendParts(); if (!parts) return;
@@ -2554,6 +2638,7 @@ function claimFinish(take){
   if (left) pendOrphan(); else { DB.meta.pendUntil = 0; save(); }
   pullTouch(); lastPull = null; renderPullBar();
   $("claimModal").className = "modal"; claimOffer = null;
+  if ($("logModal").className.indexOf("open") > -1 && selectedMech === mech) setTimeout(function(){ renderScannedBtn(); offerPulled(mech); }, 100);
 }
 $("btnClaimYes").onclick = function(){ claimFinish(true); };
 $("btnClaimNo").onclick = function(){ claimFinish(false); };
@@ -2578,11 +2663,11 @@ function renderPullBar(){
   var key = mech + "|" + (lastPull ? lastPull.num + "x" + (lastPull.qty || 1) : "") + "|" + pend + "|" + orphans;
   if (bar.getAttribute("data-key") === key){
     if (!(mech || pend)) return;
-    var lt = $("pullLeft"); if (lt){ lt.textContent = left + "s"; return; }
+    var lt = $("pullLeft"); if (lt){ lt.textContent = pullLeftTxt(left); return; }
   }
   bar.setAttribute("data-key", key);
   var head = mech ? 'Scanning as <b style="color:#fff">' + esc(mech) + '</b> <span id="pullLeft" style="color:#ffc857">' + left + 's</span>'
-           : pend ? '<span style="color:#ff6b6b">No badge \u2014 holding ' + esc(pend) + '</span> <span id="pullLeft" style="color:#ffc857">' + left + 's</span> <span style="color:#9aa3b5">scan your badge to claim</span>'
+           : pend ? '<span style="color:#ff6b6b">No badge \u2014 holding ' + esc(pend) + '</span> <span id="pullLeft" style="color:#ffc857">' + pullLeftTxt(left) + '</span> <span style="color:#9aa3b5">scan your badge, or load them when you log the work</span>'
            : '<span style="color:#ffc857">Scan your badge to start pulling parts</span>';
   bar.innerHTML = '<span class="pd">' + head +
     (lastPull ? ' &middot; last: ' + esc(lastPull.num) + ' \u2212' + (lastPull.qty || 1) : '') +
@@ -2637,6 +2722,10 @@ function offerPulled(mech){
   });
   $("pulledModal").className = "modal open";
 }
+$("btnScanned").onclick = function(){
+  if (!selectedMech){ toast("Pick the mechanic below first, then load the scanned parts", true); return; }
+  if (pendParts()) openClaim(selectedMech); else offerPulled(selectedMech);
+};
 $("btnPulledSkip").onclick = function(){ $("pulledModal").className = "modal"; pulledOffer = null; };
 $("btnPulledAdd").onclick = function(){
   if (!pulledOffer) return;
@@ -2668,8 +2757,12 @@ function scMatchPart(raw){
   var bare = q.replace(/^0+/, "");
   if (bare && DB.invCfg[bare]) return bare;
   for (var z=1; z<=3; z++){ var pad = new Array(z+1).join("0") + bare; if (DB.invCfg[pad]) return pad; }
-  return "";
+  /* a label for a long part number can carry just its first segment ("1110475" for 1110475-DUO/SL) - only when no other part shares it */
+  var hit = "", k2;
+  for (k2 in DB.invCfg){ if (scShort(k2) === q){ if (hit) return ""; hit = k2; } }
+  return hit;
 }
+function scShort(key){ var m = /^([A-Z0-9]{4,})[\-\/]/.exec(String(key || "").toUpperCase()); return m ? m[1] : ""; }
 function scFocus(){ setTimeout(function(){ try { if ($("scanCountModal").className.indexOf("open") > -1) $("scScan").focus({ preventScroll: true }); } catch(e){} }, 30); }
 function scProgress(){
   var total = 0, counted = 0;
@@ -2812,8 +2905,496 @@ function openInvModal(num){
   renderFitsChips("invEFitsRow", invEFitsGet, invEFitsSet);
   $("invEditWrap").style.display = "none";
   $("btnInvEdit").textContent = "EDIT DETAILS";
+  lblReset();
   $("invModal").className = "modal open";
 }
+
+/* ================= BARCODE LABELS (owner's edition) =================
+   A Code 128 barcode for the part in the popup, drawn right here (no library, nothing leaves the
+   device), and labels to print it on. It carries the part number exactly as stored ("59549"), or
+   "<number>*<qty>" for a box or bag ("59549*25"): the count screen adds that many and a scan on the
+   home screen pulls that many (scParseQty). Never a space in it - the count screen ends a scan on SPACE.
+   Default printer: Brother P-touch Cube, 24 mm tape cut 55 mm long for the Husky bins. It prints at
+   180 dpi through a 128-dot head, an ~18 mm band centred on the tape. Label geometry is kept in printer
+   dots so every bar lands on whole dots (2 dots a module = 1/90 in; 4 dots on a 360-dpi Cube XP).
+   Techs never see any of it: it only switches on in the owner's edition. */
+function lblOn(){ return typeof ADMIN_MODE !== "undefined" && ADMIN_MODE === true; }
+
+/* ---- Code 128 encoder ---- */
+/* bar/space widths of symbols 0-105 (bar first), then the stop */
+var C128 = ("212222 222122 222221 121223 121322 131222 122213 122312 132212 221213 " +
+  "221312 231212 112232 122132 122231 113222 123122 123221 223211 221132 " +
+  "221231 213212 223112 312131 311222 321122 321221 312212 322112 322211 " +
+  "212123 212321 232121 111323 131123 131321 112313 132113 132311 211313 " +
+  "231113 231311 112133 112331 132131 113123 113321 133121 313121 211331 " +
+  "231131 213113 213311 213131 311123 311321 331121 312113 312311 332111 " +
+  "314111 221411 431111 111224 111422 121124 121421 141122 141221 112214 " +
+  "112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 " +
+  "111242 121142 121241 114212 124112 124211 411212 421112 421211 212141 " +
+  "214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 " +
+  "114131 311141 411131 211412 211214 211232 2331112").split(" ");
+/* text -> symbol values: start, data, check (the stop is added when drawing). Code set B carries
+   printable ASCII; set C packs two digits a symbol and is used wherever it makes the barcode shorter
+   (runs of 4+ digits): the fewest symbols wins, a tie stays in B. null = a character B can't carry. */
+function c128Values(text){
+  var s = String(text == null ? "" : text), n = s.length, i, v;
+  if (!n) return null;
+  for (i=0;i<n;i++){ v = s.charCodeAt(i); if (v < 32 || v > 126) return null; }
+  var pair = function(k){ return k + 1 < n && /^[0-9][0-9]$/.test(s.substr(k, 2)); };
+  /* fewest symbols to finish from position i while in set B (inB) or C (inC); goC / goB = switching
+     sets first is shorter */
+  var inB = [], inC = [], goC = [], goB = [], stay, sw;
+  inB[n] = 0; inC[n] = 0;
+  for (i=n-1;i>=0;i--){
+    stay = 1 + inB[i+1]; sw = pair(i) ? 2 + inC[i+2] : 1e9;
+    goC[i] = sw < stay; inB[i] = goC[i] ? sw : stay;
+    stay = pair(i) ? 1 + inC[i+2] : 1e9; sw = 2 + inB[i+1];
+    goB[i] = sw < stay; inC[i] = goB[i] ? sw : stay;
+  }
+  var set = inC[0] < inB[0] ? "C" : "B", out = [set === "C" ? 105 : 104];
+  for (i=0;i<n;){
+    if (set === "B" && goC[i]){ out.push(99); set = "C"; }            /* CODE C */
+    else if (set === "C" && goB[i]){ out.push(100); set = "B"; }      /* CODE B */
+    if (set === "C"){ out.push(parseInt(s.substr(i, 2), 10)); i += 2; }
+    else { out.push(s.charCodeAt(i) - 32); i++; }
+  }
+  var sum = out[0];
+  for (i=1;i<out.length;i++) sum += out[i] * i;
+  out.push(sum % 103);                                                /* mod-103 check symbol */
+  return out;
+}
+/* symbol values -> the bars as [x, width] in modules, stop included; w = modules in all (no quiet zone) */
+function c128Bars(vals){
+  var bars = [], x = 0, i, j, p, w;
+  for (i=0;i<=vals.length;i++){
+    p = C128[i < vals.length ? vals[i] : 106];
+    for (j=0;j<p.length;j++){
+      w = +p.charAt(j);
+      if (!(j % 2)) bars.push([x, w]);
+      x += w;
+    }
+  }
+  return { bars: bars, w: x };
+}
+/* ---- end Code 128 ---- */
+
+var LBL_FONT = "Arial, Helvetica, sans-serif";
+var LBL_PACKS = [10, 25, 50, 100];
+var LBL_LAYOUTS = { pt24: 1, roll: 1, a5160: 1 };
+var LBL_SIZES = {
+  s225: { t: "2.25 x 1.25 in", w: 2.25, h: 1.25 },
+  s2x1: { t: "2 x 1 in",       w: 2,    h: 1 },
+  s3x2: { t: "3 x 2 in",       w: 3,    h: 2 },
+  s4x6: { t: "4 x 6 in",       w: 4,    h: 6 }
+};
+var lblSt = { num: "", qty: 1, custom: false }, lblArmed = false, lblMeasure = null, lblCrcT = null;
+
+/* layout choice, remembered on this device only (DB.meta never syncs) */
+function lblPrefs(){
+  var m = DB.meta.lbl;
+  if (!m || typeof m !== "object") m = DB.meta.lbl = {};
+  if (!LBL_LAYOUTS[m.layout]) m.layout = "pt24";
+  if (!LBL_SIZES[m.size]) m.size = "s225";
+  if (m.dpi !== 300) m.dpi = 203;
+  return m;
+}
+/* One label's geometry in dots of sp.dpi: size W x H, clear margins padX / padY, the module widths
+   to try (whole dots, >= ~0.25 mm, widest first), text sizes, and the page it prints on (mm). */
+function lblSpec(){
+  var P = lblPrefs(), s, dpi, hmm, pad, mods = [], k;
+  var d = function(mm, dp){ return Math.round(mm * dp / 25.4); };
+  if (P.layout === "pt24"){
+    /* 55 x 24 mm at 180 dpi = 390 x 170 dots. The head's 128 dots sit centred: 21 dots (~3 mm) blank
+       top and bottom, and 21 dots kept clear at each end. 2-dot modules; bars at least 8 mm tall. */
+    return { kind: "pt24", dpi: 180, W: 390, H: 170, padX: 21, padY: 21, mods: [2], numSize: 28, nameSize: 18,
+             nameLines: 1, minBh: d(8, 180), maxBh: 128, pageW: 55, pageH: 24, title: "55 x 24 mm" };
+  }
+  if (P.layout === "a5160"){
+    /* Avery 5160 on Letter: 3 x 10 labels of 2-5/8 x 1 in, 1/2 in top margin, 3/16 in left, 2-3/4 in
+       across, 1 in down. Kept at 300 dpi: 3-5 dot modules stay whole dots at 300 / 600 / 1200 dpi. */
+    return { kind: "a5160", dpi: 300, W: 787, H: 300, padX: 45, padY: 15, mods: [5, 4, 3], numSize: d(4, 300),
+             nameSize: d(2.3, 300), nameLines: 1, minBh: d(8, 300), maxBh: 300, pageW: 215.9, pageH: 279.4,
+             title: "2-5/8 x 1 in", sheet: { cols: 3, rows: 10, x: 56, y: 150, dx: 825, dy: 300 } };
+  }
+  /* one label per page on a thermal label printer: 203 dpi (8 dots/mm) unless told 300 */
+  s = LBL_SIZES[P.size]; dpi = P.dpi === 300 ? 300 : 203.2; hmm = s.h * 25.4;
+  pad = Math.round(Math.min(0.25, Math.max(0.06, Math.min(s.w, s.h) * 0.07)) * dpi);
+  for (k = Math.floor(0.51 * dpi / 25.4); k >= 1; k--) if (k * 25.4 / dpi >= 0.245) mods.push(k);
+  return { kind: "roll", dpi: dpi, W: Math.round(s.w * dpi), H: Math.round(s.h * dpi), padX: pad, padY: pad, mods: mods,
+           numSize: d(Math.min(16, Math.max(3.5, hmm * 0.16)), dpi), nameSize: d(Math.min(7, Math.max(2.2, hmm * 0.09)), dpi),
+           nameLines: hmm >= 100 ? 3 : (hmm >= 30 ? 2 : 1), minBh: d(8, dpi), maxBh: Math.round(s.w * dpi * 0.5),
+           pageW: s.w * 25.4, pageH: s.h * 25.4, title: s.t };
+}
+function lblFont(size, bold){ return (bold ? "bold " : "") + size + "px " + LBL_FONT; }
+function lblTextW(t, font){
+  if (!lblMeasure){ try { lblMeasure = document.createElement("canvas").getContext("2d"); } catch(e){} }
+  if (!lblMeasure) return String(t).length * parseFloat(font.replace(/^bold /, "")) * 0.6;
+  lblMeasure.font = font;
+  return lblMeasure.measureText(String(t)).width;
+}
+/* word-wrap into at most maxLines lines of maxW; the last line ends in ... when the rest doesn't fit */
+function lblWrap(text, font, maxW, maxLines){
+  var words = String(text == null ? "" : text).replace(/\s+/g, " ").replace(/^ | $/g, "").split(" ");
+  var lines = [], cur = "", i = 0, cut = false, w, t, j;
+  if (!words[0] || maxLines < 1) return lines;
+  while (i < words.length){
+    w = words[i]; t = cur ? cur + " " + w : w;
+    if (lblTextW(t, font) <= maxW){ cur = t; i++; continue; }
+    if (lines.length === maxLines - 1){ cut = true; break; }
+    if (cur){ lines.push(cur); cur = ""; continue; }
+    j = w.length;                                     /* one word wider than the line: break it */
+    while (j > 1 && lblTextW(w.slice(0, j), font) > maxW) j--;
+    lines.push(w.slice(0, j)); words[i] = w.slice(j);
+  }
+  if (cut){
+    t = (cur ? cur + " " : "") + words.slice(i).join(" ");
+    j = t.length;
+    while (j > 0 && lblTextW(t.slice(0, j) + "\u2026", font) > maxW) j--;
+    cur = t.slice(0, j).replace(/\s+$/, "") + "\u2026";
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+/* Where everything goes on one label (dots): the widest whole-dot module whose bars fit between quiet
+   zones of at least 10 modules (and at least the side margin), the number row, the name if there is
+   room for it, then the bars. */
+function lblGeom(sp, enc, head, name, single){
+  var g = { sp: sp, enc: enc, rows: [], warn: "", err: "" }, k = 0, i, m, n, lines = [];
+  var fits = function(md){ return enc.w * md + 2 * Math.max(10 * md, sp.padX) <= sp.W; };
+  for (i=0;i<sp.mods.length && !k;i++) if (fits(sp.mods[i])) k = sp.mods[i];
+  if (!k){
+    for (m = sp.mods[sp.mods.length - 1] - 1; m >= 1 && !k; m--) if (fits(m)) k = m;
+    if (!k){ g.err = "Too long for this label even with the thinnest bars - " + (single ? "pick a bigger label under LAYOUT." : "pick Single, or a bigger label."); return g; }
+    g.warn = "Long code: printing with " + k + "-dot bars (" + (k * 25.4 / sp.dpi).toFixed(2) + " mm) to make it fit - bars that thin can be hard to scan. " +
+             (single ? "A bigger label (LAYOUT) gives wider bars." : "Single (no pack number) or a bigger label gives wider bars.");
+  }
+  g.mod = k; g.bw = enc.w * k; g.bx = Math.floor((sp.W - g.bw) / 2);
+  g.x0 = sp.padX; g.tw = sp.W - 2 * sp.padX;
+  var inner = sp.H - 2 * sp.padY, ns = sp.numSize, hw = lblTextW(head, lblFont(ns, true));
+  if (hw > g.tw) ns = Math.max(10, Math.floor(ns * g.tw / hw));
+  var nl = Math.round(ns * 1.15), ml = Math.round(sp.nameSize * 1.2), gap = Math.round(sp.nameSize * 0.4);
+  for (n = sp.nameLines; n >= 0; n--){
+    lines = lblWrap(name, lblFont(sp.nameSize, false), g.tw, n);
+    if (inner - nl - lines.length * ml - gap >= sp.minBh) break;
+  }
+  var bh = Math.min(sp.maxBh, inner - nl - lines.length * ml - gap);
+  var y = sp.padY + Math.floor((inner - nl - lines.length * ml - gap - bh) / 2);
+  g.rows.push({ t: head, size: ns, bold: true, y: y, h: nl }); y += nl;
+  for (i=0;i<lines.length;i++){ g.rows.push({ t: lines[i], size: sp.nameSize, bold: false, y: y, h: ml }); y += ml; }
+  g.by = y + gap; g.bh = bh;
+  return g;
+}
+function lblIncr(name){ var m = /INCR:\s*(\d{1,4})\b/i.exec(String(name || "")); return (m && +m[1] > 1) ? +m[1] : 0; }
+function lblCopies(){ var n = parseInt($("lblCopies").value, 10); return (isNaN(n) || n < 1) ? 1 : Math.min(n, 100); }
+function lblStartAt(){ var n = parseInt($("lblStart").value, 10); return (isNaN(n) || n < 1) ? 1 : Math.min(n, 30); }
+function lblPayload(key, qty){ return qty > 1 ? key + "*" + qty : key; }
+/* Would a scan of this label come back as exactly this part and this many, the way the scan screens read
+   it? A space ends a scan on the count screen, both screens skip most symbols ("59.549" -> 59549), and a
+   scan ending in K1-... is taken as a command label. */
+function lblReadsBack(key, qty, code){
+  var s = lblPayload(code || key, qty), back = scParseQty(s);
+  if (/\s/.test(s) || /K1-[A-Z0-9\-]+$/i.test(s)) return false;
+  return scMatchPart(back.raw) === key && back.qty === qty;
+}
+/* everything about the label for the part and pack size picked right now. A label that wouldn't scan back
+   as this part and this many is refused (no barcode, PRINT and SAVE off): "KIT 59549*25" would end up as
+   +25 on part 59549. */
+function lblState(){
+  var key = String(lblSt.num), c = DB.invCfg[key], p = partRow(key), qty = lblSt.qty, vals, single;
+  var st = { key: key, qty: qty, name: (c && c.n) ? c.n : (p ? pname(p) : ""), payload: lblPayload(key, qty),
+             enc: null, sp: lblSpec(), g: null, warns: [], err: "" };
+  vals = c128Values(st.payload);
+  if (!vals){ st.err = "This part number has a character a barcode can't carry - rename it under EDIT DETAILS (letters, digits, - and /)."; return st; }
+  single = lblReadsBack(key, 1);
+  if (!single || !lblReadsBack(key, qty)){
+    st.err = single
+      ? "A \u00d7" + qty + " label wouldn't scan back as " + qty + " of " + key + " - pick Single, or rename the part under EDIT DETAILS to letters, digits, - and /."
+      : "No label for this part: the scan screens can't read \"" + key + "\" back (a space ends a scan, and they skip most symbols), so a scan would miss it or count the wrong part. Rename it under EDIT DETAILS to letters, digits, - and / (no spaces) first.";
+    return st;
+  }
+  if (st.payload.length < 4)
+    st.warns.push("Heads-up: the home screen ignores scans shorter than 4 characters, so this label only counts on the count screen" + (qty > 1 ? "." : " - a pack label (\u00d710 and up) works on both."));
+  st.enc = c128Bars(vals);
+  st.g = lblGeom(st.sp, st.enc, key + (qty > 1 ? "\u2002\u00d7" + qty : ""), st.name, qty === 1);
+  /* too long for normal bars: carry the short scan code instead, if it scans back as this part (the label still prints the full number) */
+  var sc = scShort(key), sv, se, sg;
+  if ((st.g.err || st.g.warn) && sc && lblReadsBack(key, 1, sc) && lblReadsBack(key, qty, sc) && (sv = c128Values(lblPayload(sc, qty)))){
+    se = c128Bars(sv); sg = lblGeom(st.sp, se, key + (qty > 1 ? "\u2002\u00d7" + qty : ""), st.name, qty === 1);
+    if (!sg.err && (st.g.err || !sg.warn || sg.mod > st.g.mod)){
+      st.payload = lblPayload(sc, qty); st.enc = se; st.g = sg;
+      st.warns.push("The full number is too long for this label, so the barcode carries the short scan code " + sc + " - every scanner reads " + sc + " as " + key + ".");
+    }
+  }
+  if (st.g.err) st.err = st.g.err; else if (st.g.warn) st.warns.push(st.g.warn);
+  return st;
+}
+/* every time the popup opens: section closed, button only in the owner's edition */
+function lblReset(){
+  if (lblArmed) lblDisarm();
+  $("invLblWrap").style.display = "none";
+  $("btnInvLbl").textContent = "BARCODE / LABELS";
+  $("btnInvLbl").style.display = lblOn() ? "" : "none";
+  $("lblImgWrap").style.display = "none"; $("lblImgWrap").innerHTML = "";
+}
+/* the section opens on the pack size last picked for this part here, else the INCR: n in its name, else Single */
+function lblOpen(){
+  var key = String(invModalNum), c = DB.invCfg[key], incr = lblIncr(c ? c.n : "");
+  var rem = (DB.meta.lblPk && typeof DB.meta.lblPk === "object") ? parseInt(DB.meta.lblPk[key], 10) : 0, P = lblPrefs();
+  lblSt.num = key;
+  lblSt.qty = (rem >= 1 && rem <= 9999) ? rem : (incr || 1);
+  lblSt.custom = lblSt.qty > 1 && lblSt.qty !== incr && LBL_PACKS.indexOf(lblSt.qty) < 0;
+  $("lblCustom").value = lblSt.custom ? String(lblSt.qty) : "";
+  $("lblCopies").value = "1"; $("lblStart").value = "1";
+  $("lblLayout").value = P.layout; $("lblSize").value = P.size; $("lblDpi").value = String(P.dpi);
+  $("lblImgWrap").style.display = "none"; $("lblImgWrap").innerHTML = "";
+  lblRender();
+}
+/* A pack size picked here is remembered for the part on THIS device only (DB.meta.lblPk). It is not put in
+   invCfg: the server's merge (merge.py) and mergeRemote() carry only n / r / g / k / t, so an extra field
+   would be dropped on the way to every other device - and stamping cfgTouched for it would let this
+   device's copy of the part overwrite a newer name or threshold edit made elsewhere. */
+function lblPick(q, custom){
+  lblSt.qty = q; lblSt.custom = custom;
+  if (!custom) $("lblCustom").value = "";
+  if (!DB.meta.lblPk || typeof DB.meta.lblPk !== "object") DB.meta.lblPk = {};
+  DB.meta.lblPk[lblSt.num] = q;
+  saveQuiet();
+  lblRender();
+}
+function lblRects(enc, q){
+  var h = "", b = enc.bars, i;
+  for (i=0;i<b.length;i++) h += '<rect x="' + (q + b[i][0]) + '" y="0" width="' + b[i][1] + '" height="1"/>';
+  return h;
+}
+/* on screen: a whole number of device pixels per module, 10-module quiet zone each side */
+function lblSvgScreen(enc){
+  var q = 10, T = enc.w + 2 * q, dpr = window.devicePixelRatio || 1;
+  var avail = Math.max(160, ($("lblCard").clientWidth || 320) - 16);
+  var k = Math.max(1, Math.min(Math.floor(avail * dpr / T), Math.round(3 * dpr)));
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="' + (T * k / dpr) + '" height="70" viewBox="0 0 ' + T + ' 1"' +
+         ' preserveAspectRatio="none" shape-rendering="crispEdges" fill="#000" style="background:#fff">' + lblRects(enc, q) + '</svg>';
+}
+function lblRender(){
+  if ($("invLblWrap").style.display === "none") return;
+  var st = lblState(), P = lblPrefs(), row = $("lblQtyRow"), incr = lblIncr(st.name), opts = [1].concat(LBL_PACKS), i, n;
+  if (incr && opts.indexOf(incr) < 0) opts.push(incr);
+  row.innerHTML = "";
+  for (i=0;i<opts.length;i++){
+    (function(q){
+      var b = document.createElement("button");
+      b.className = "chip" + (!lblSt.custom && lblSt.qty === q ? " on" : "");
+      b.textContent = q === 1 ? "SINGLE" : "\u00d7" + q + (q === incr ? " INCR" : "");
+      b.onclick = function(){ lblPick(q, false); };
+      row.appendChild(b);
+    })(opts[i]);
+  }
+  $("lblCustom").style.borderColor = lblSt.custom ? "#e10a17" : "";
+  $("lblCard").innerHTML = (st.enc ? lblSvgScreen(st.enc) : "") +
+    '<div class="lblnum">' + esc(st.key) + (st.qty > 1 ? '<span class="lblqty">\u00d7' + st.qty + '</span>' : '') + '</div>' +
+    (st.name ? '<div class="lblname">' + esc(st.name) + '</div>' : '');
+  $("lblInfo").textContent = st.enc ? ("Scans as " + st.payload + (st.g && !st.err ? "  \u00b7  bars " + (st.g.mod * 25.4 / st.sp.dpi).toFixed(3) +
+    " mm = " + st.g.mod + " dot" + (st.g.mod > 1 ? "s" : "") + " at " + Math.round(st.sp.dpi) + " dpi" : "")) : "";
+  var warn = (st.err ? [st.err] : []).concat(st.warns);
+  $("lblWarn").textContent = warn.join(" ");
+  $("lblWarn").style.display = warn.length ? "" : "none";
+  $("lblWarn").style.color = st.err ? "#ff6b6b" : "#ffc857";
+  $("lblSizeWrap").style.display = P.layout === "roll" ? "flex" : "none";
+  $("lblStartWrap").style.display = P.layout === "a5160" ? "" : "none";
+  n = lblCopies();
+  $("lblHint").textContent = P.layout === "pt24"
+    ? "Print dialog: choose the Brother printer, 24 mm tape, 55 mm length, no extra margins" + (n > 1 ? " (" + n + " labels = " + n + " pages)." : ".") + " On a phone: SAVE LABEL IMAGE, then print it from the Brother app."
+    : P.layout === "roll"
+    ? "Print dialog: choose the label printer and " + LBL_SIZES[P.size].t + " labels, margins none, scale 100%" + (n > 1 ? " (one label a page, " + n + " pages)." : ".") + " Pick 300 dpi if the printer is 300 dpi."
+    : "Load an Avery 5160 sheet; print at 100% / actual size with margins none. START AT skips labels already used on the sheet.";
+  $("btnLblPrint").disabled = !!st.err; $("btnLblImg").disabled = !!st.err;
+  $("btnLblPrint").style.opacity = st.err ? ".4" : ""; $("btnLblImg").style.opacity = st.err ? ".4" : "";
+}
+/* dots in a step that is a whole number of both printer dots and CSS px (180 dpi: 15 dots = 8 px) */
+function lblGrid(dpi){
+  for (var n=1;n<1000;n++){ var v = n * 96 / dpi; if (Math.abs(v - Math.round(v)) < 1e-9) return n; }
+  return 1;
+}
+/* One label as absolutely placed text + SVG, (ox, oy) dots from the page corner. Chrome's print output
+   snaps an SVG's box to whole CSS px (at 180 dpi a px is 1.875 dots), which would put every bar edge on
+   a half dot for the printer to round either way. So the box sits on a step that is whole px AND whole
+   dots, is sized in whole px, and the bars are placed inside it through the viewBox (never snapped):
+   exactly g.mod dots a module, each edge a quarter dot past its dot so rounding and flooring agree. */
+function lblHtml(g, ox, oy){
+  var sp = g.sp, h = "", i, r, G = lblGrid(sp.dpi), bx = ox + g.bx, L = Math.floor(bx / G) * G, BW = Math.ceil((bx + g.bw - L) / G) * G;
+  var mm = function(dots){ return (dots * 25.4 / sp.dpi).toFixed(3) + "mm"; };
+  var px = function(dots){ return Math.round(dots * 96 / sp.dpi) + "px"; };
+  for (i=0;i<g.rows.length;i++){
+    r = g.rows[i];
+    h += '<div style="position:absolute; left:' + mm(ox + g.x0) + '; top:' + mm(oy + r.y) + '; width:' + mm(g.tw) + '; height:' + mm(r.h) +
+         '; line-height:' + mm(r.h) + '; font:' + (r.bold ? "bold " : "") + mm(r.size) + ' ' + LBL_FONT +
+         '; text-align:center; white-space:nowrap; overflow:hidden; color:#000">' + esc(r.t) + '</div>';
+  }
+  return h + '<svg xmlns="http://www.w3.org/2000/svg" style="position:absolute; left:' + px(L) + '; top:' + mm(oy + g.by) +
+         '; width:' + px(BW) + '; height:' + mm(g.bh) + '" viewBox="' + (-(bx - L + 0.25) / g.mod) + ' 0 ' + (BW / g.mod) + ' 1"' +
+         ' preserveAspectRatio="none" shape-rendering="crispEdges" fill="#000">' + lblRects(g.enc, 0) + '</svg>';
+}
+function lblPageCss(){
+  var st = $("lblPageCss");
+  if (!st){ st = document.createElement("style"); st.id = "lblPageCss"; (document.head || document.getElementsByTagName("head")[0]).appendChild(st); }
+  return st;
+}
+/* PRINT LABELS: fill the print-only box, give the page the label's size, print; afterprint puts it all back */
+function lblPrint(){
+  var st = lblState();
+  if (st.err){ toast(st.err, true); return; }
+  var sp = st.sp, g = st.g, n = lblCopies(), html = "", i, S, per, pos, cells = "";
+  var page = function(inner){ return '<div class="lblpg" style="width:' + sp.pageW.toFixed(2) + 'mm; height:' + (sp.pageH - 0.2).toFixed(2) + 'mm">' + inner + '</div>'; };
+  if (sp.sheet){
+    S = sp.sheet; per = S.cols * S.rows; pos = lblStartAt() - 1;
+    for (i=0;i<n;i++, pos++){
+      if (pos === per){ html += page(cells); cells = ""; pos = 0; }
+      cells += lblHtml(g, S.x + (pos % S.cols) * S.dx, S.y + Math.floor(pos / S.cols) * S.dy);
+    }
+    html += page(cells);
+  } else for (i=0;i<n;i++) html += page(lblHtml(g, 0, 0));
+  $("lblPrint").innerHTML = html;
+  lblPageCss().textContent = "@page { size: " + sp.pageW.toFixed(2) + "mm " + sp.pageH.toFixed(2) + "mm; margin: 0; }";
+  var de = document.documentElement;
+  if (!/\blblprinting\b/.test(de.className)) de.className = (de.className ? de.className + " " : "") + "lblprinting";
+  lblArmed = true;
+  try { window.print(); } catch(e){ lblDisarm(); toast("This browser can't print - use SAVE LABEL IMAGE", true); }
+}
+function lblDisarm(){
+  lblArmed = false;
+  var de = document.documentElement;
+  de.className = de.className.replace(/\s*\blblprinting\b/g, "").replace(/^\s+/, "");
+  if ($("lblPageCss")) $("lblPageCss").textContent = "";
+  $("lblPrint").innerHTML = "";
+}
+/* the label as a PNG, 1 pixel = 1 printer dot (Brother: 390 x 170 px at 180 dpi = 55 x 24 mm), pure black on white */
+function lblCanvas(g){
+  var sp = g.sp, cv = document.createElement("canvas"), c = null, b = g.enc.bars, i, r, im, px, v;
+  cv.width = sp.W; cv.height = sp.H;
+  try { c = cv.getContext("2d"); } catch(e){}
+  if (!c) return null;
+  c.fillStyle = "#fff"; c.fillRect(0, 0, sp.W, sp.H);
+  c.fillStyle = "#000"; c.textAlign = "center"; c.textBaseline = "middle";
+  for (i=0;i<g.rows.length;i++){
+    r = g.rows[i]; c.font = lblFont(r.size, r.bold);
+    c.fillText(r.t, g.x0 + g.tw / 2, r.y + r.h / 2, g.tw);
+  }
+  for (i=0;i<b.length;i++) c.fillRect(g.bx + b[i][0] * g.mod, g.by, b[i][1] * g.mod, g.bh);
+  /* no greys: threshold the text's anti-aliasing so every pixel is a printer dot or blank */
+  im = c.getImageData(0, 0, sp.W, sp.H); px = im.data;
+  for (i=0;i<px.length;i+=4){
+    v = (px[i] * 299 + px[i+1] * 587 + px[i+2] * 114) < 127500 ? 0 : 255;
+    px[i] = v; px[i+1] = v; px[i+2] = v; px[i+3] = 255;
+  }
+  c.putImageData(im, 0, 0);
+  return cv;
+}
+function lblCrc(a, s, e){
+  var c, n, k;
+  if (!lblCrcT){
+    lblCrcT = [];
+    for (n=0;n<256;n++){ c = n; for (k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); lblCrcT[n] = c >>> 0; }
+  }
+  c = 0xFFFFFFFF;
+  for (n=s;n<e;n++) c = lblCrcT[(c ^ a[n]) & 255] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+/* write the resolution into the PNG (pHYs, pixels per metre) so apps that read it print 1 pixel = 1 dot */
+function lblPngDpi(a, dpi){
+  var ppm = Math.round(dpi / 0.0254), o = 8, len, type, ch = new Uint8Array(21), out;
+  var put = function(x, at, v){ x[at] = (v >>> 24) & 255; x[at+1] = (v >>> 16) & 255; x[at+2] = (v >>> 8) & 255; x[at+3] = v & 255; };
+  var get = function(x, at){ return ((x[at] << 24) | (x[at+1] << 16) | (x[at+2] << 8) | x[at+3]) >>> 0; };
+  if (a.length < 33 || a[0] !== 0x89 || a[1] !== 0x50 || a[2] !== 0x4E || a[3] !== 0x47) return a;
+  while (o + 8 <= a.length){
+    len = get(a, o); type = String.fromCharCode(a[o+4], a[o+5], a[o+6], a[o+7]);
+    if (type === "pHYs" && len === 9){ put(a, o+8, ppm); put(a, o+12, ppm); a[o+16] = 1; put(a, o+17, lblCrc(a, o+4, o+17)); return a; }
+    if (type === "IDAT" || type === "IEND") break;
+    o += 12 + len;
+  }
+  put(ch, 0, 9); ch[4] = 0x70; ch[5] = 0x48; ch[6] = 0x59; ch[7] = 0x73;
+  put(ch, 8, ppm); put(ch, 12, ppm); ch[16] = 1; put(ch, 17, lblCrc(ch, 4, 17));
+  out = new Uint8Array(a.length + 21);
+  out.set(a.subarray(0, 33), 0); out.set(ch, 33); out.set(a.subarray(33), 54);   /* right after IHDR */
+  return out;
+}
+function lblB64dec(b64){ var s = atob(b64), a = new Uint8Array(s.length), i; for (i=0;i<s.length;i++) a[i] = s.charCodeAt(i); return a; }
+function lblB64enc(a){
+  var s = "", i;
+  for (i=0;i<a.length;i+=8192) s += String.fromCharCode.apply(null, Array.prototype.slice.call(a.subarray(i, i + 8192)));
+  return btoa(s);
+}
+function lblDownload(blob, fname){
+  var a = document.createElement("a"), url;
+  if (!("download" in a) || !window.URL || !URL.createObjectURL) return false;   /* old iPad: long-press the picture */
+  try { url = URL.createObjectURL(blob); } catch(e){ return false; }
+  a.href = url; a.download = fname; a.style.display = "none";
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch(e){} }, 5000);
+  return true;
+}
+/* phone / tablet: the share sheet, straight into Brother's app; a computer (or no sharing): a download */
+function lblDeliver(blob, fname){
+  var file = null, coarse = false, can = false;
+  try { file = new File([blob], fname, { type: "image/png" }); } catch(e){}
+  try { coarse = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches); } catch(e){}
+  if (file && coarse && navigator.share && navigator.canShare){
+    try { can = navigator.canShare({ files: [file] }); } catch(e){}
+    if (can){
+      try {
+        navigator.share({ files: [file] })["catch"](function(err){ if (!err || err.name !== "AbortError") lblDownload(blob, fname); });
+        return "share";
+      } catch(e){}
+    }
+  }
+  return lblDownload(blob, fname) ? "download" : "";
+}
+/* SAVE LABEL IMAGE: one image of one label; copies are set in the printer's app */
+function lblImage(){
+  var st = lblState();
+  if (st.err){ toast(st.err, true); return; }
+  var sp = st.sp, cv = lblCanvas(st.g), n = lblCopies(), bytes, b64, blob = null, how, w;
+  if (!cv){ toast("This browser can't draw the label image", true); return; }
+  try {
+    bytes = lblPngDpi(lblB64dec(cv.toDataURL("image/png").split(",")[1]), sp.dpi);
+    b64 = lblB64enc(bytes);
+  } catch(e){ toast("Couldn't make the label image", true); return; }
+  try { blob = new Blob([bytes], { type: "image/png" }); } catch(e){}
+  w = $("lblImgWrap");
+  w.innerHTML = '<img alt="label" src="data:image/png;base64,' + b64 + '" style="width:' + sp.W + 'px; max-width:100%; image-rendering:pixelated; border:1px solid #384060; background:#fff">' +
+                '<p style="color:#9aa3b5; font-size:12px; margin-top:6px; line-height:1.4"></p>';
+  w.querySelector("p").textContent = sp.W + " x " + sp.H + " px at " + Math.round(sp.dpi) + " dpi = " + sp.title + ". " +
+    (sp.kind === "pt24" ? "Print it from the Brother app (iPrint&Label / Design&Print) on 24 mm tape, 55 mm long" : "Print it at 100% on " + sp.title + " labels") +
+    " - COPIES: set " + n + " there. Long-press or right-click the picture to save or share it again.";
+  w.style.display = "";
+  how = blob ? lblDeliver(blob, st.key.replace(/[^A-Za-z0-9-]+/g, "_") + (st.qty > 1 ? "x" + st.qty : "") + "-label.png") : "";
+  if (how === "download") toast("Label image saved - print " + n + " cop" + (n === 1 ? "y" : "ies") + " of it");
+  else if (!how) toast("Long-press the picture below to save it", true);
+}
+$("btnInvLbl").onclick = function(){
+  if (!lblOn()) return;
+  var w = $("invLblWrap"), open = w.style.display !== "none";
+  w.style.display = open ? "none" : "block";
+  $("btnInvLbl").textContent = open ? "BARCODE / LABELS" : "HIDE LABELS";
+  if (!open) lblOpen();
+};
+$("lblCustom").addEventListener("input", function(){
+  var t = String(this.value || "").trim(), v = parseInt(t, 10), c;
+  if (!t && !(this.validity && this.validity.badInput)){
+    /* box emptied: a custom number picked from it goes too - back to the part's INCR: n, else Single */
+    this.style.borderColor = "";
+    if (lblSt.custom){ c = DB.invCfg[lblSt.num]; lblPick(lblIncr(c ? c.n : "") || 1, false); }
+    return;
+  }
+  if (!/^\d{1,4}$/.test(t) || v < 1){ this.style.borderColor = "#ff6b6b"; return; }
+  lblPick(v, true);
+});
+$("lblLayout").addEventListener("change", function(){ lblPrefs().layout = this.value; saveQuiet(); lblRender(); });
+$("lblSize").addEventListener("change", function(){ lblPrefs().size = this.value; saveQuiet(); lblRender(); });
+$("lblDpi").addEventListener("change", function(){ lblPrefs().dpi = parseInt(this.value, 10); saveQuiet(); lblRender(); });
+$("lblCopies").addEventListener("input", lblRender);
+$("lblStart").addEventListener("input", lblRender);
+$("btnLblPrint").onclick = lblPrint;
+$("btnLblImg").onclick = lblImage;
+window.addEventListener("afterprint", function(){ if (lblArmed) setTimeout(lblDisarm, 0); });
 
 /* ---- how often a part shows up in logged work, so a delete can warn ---- */
 function partUsageCount(num){
@@ -3258,6 +3839,23 @@ function openLog(){
   $("partResults").innerHTML = "";
   renderQuickRow(); renderMechRow(); renderSelParts(); updateAutoNote();
   $("logModal").className = "modal open";
+  /* the mechanic is often pre-filled on their own device, so offer their scanned parts right away */
+  if (selectedMech) setTimeout(function(){ if ($("logModal").className.indexOf("open") > -1) offerPulled(selectedMech); }, 150);
+}
+/* "+ SCANNED PARTS (n)": parts this mechanic scanned off the shelf that are not on the form yet */
+function scannedLeft(){
+  var n = parsePartsString(pendParts()).length;
+  if (!selectedMech) return n;
+  var q = pulledFor(selectedMech), have = {}, k, i;
+  for (i=0;i<selectedParts.length;i++) have[selectedParts[i].num.toUpperCase()] = 1;
+  for (k in q) if (!have[k.toUpperCase()]) n++;
+  return n;
+}
+function renderScannedBtn(){
+  var b = $("btnScanned"); if (!b) return;
+  var n = scannedLeft();
+  b.style.display = n ? "" : "none";
+  b.textContent = "+ SCANNED PARTS (" + n + ")" + (selectedMech ? " \u2014 " + selectedMech : " \u2014 pick the mechanic below first");
 }
 function closeLog(){
   $("logModal").className = "modal";
@@ -3309,7 +3907,7 @@ function renderMechRow(){
       var c = document.createElement("button");
       c.className = "chip" + (selectedMech===m ? " on" : "");
       c.textContent = m;
-      c.onclick = function(){ selectedMech = m; renderMechRow(); offerPulled(m); };
+      c.onclick = function(){ selectedMech = m; renderMechRow(); renderScannedBtn(); if (pendParts()) openClaim(m); else offerPulled(m); };
       row.appendChild(c);
     })(DB.mechanics[i]);
   }
@@ -3378,6 +3976,7 @@ function addPart(num, desc){
   renderSelParts();
 }
 function renderSelParts(){
+  setTimeout(renderScannedBtn, 0);
   var el = $("selParts"); el.innerHTML = "";
   for (var i=0;i<selectedParts.length;i++){
     (function(sp){
